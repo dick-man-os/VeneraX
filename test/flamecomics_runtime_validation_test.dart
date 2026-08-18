@@ -67,7 +67,7 @@ void main() {
 
       expect(source.key, equals('en_flamecomics'));
       expect(source.name, equals('Flame Comics'));
-      expect(source.version, equals('1.0.0'));
+      expect(source.version, equals('1.0.1'));
       expect(source.explorePages, isNotEmpty);
       expect(source.searchPageData, isNotNull);
       expect(source.searchPageData!.loadPage, isNotNull);
@@ -75,7 +75,6 @@ void main() {
       expect(source.loadComicPages, isNotNull);
       expect(source.getImageLoadingConfig, isNotNull);
       expect(source.getThumbnailLoadingConfig, isNotNull);
-      print('Parsed Flame Comics source: key=${source.key}, name=${source.name}, version=${source.version}');
     });
 
     test('2. Explore Popular loads ranking list', () async {
@@ -89,7 +88,6 @@ void main() {
       expect(first.id, isNotEmpty);
       expect(first.cover, startsWith('http'));
       sampleComicId = first.id;
-      print('Explore Popular count: ${res.data!.length}, first: ${first.title} (${first.id}) [cover: ${first.cover}]');
     });
 
     test('3. Explore Latest loads latest entries', () async {
@@ -102,7 +100,6 @@ void main() {
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       expect(first.cover, startsWith('http'));
-      print('Explore Latest count: ${res.data!.length}, first: ${first.title} (${first.id})');
     });
 
     test('4. Search queries keyword and returns matching comics', () async {
@@ -112,51 +109,44 @@ void main() {
       final match = searchRes.data!.first;
       expect(match.title, isNotEmpty);
       expect(match.id, isNotEmpty);
-      print('Search returned ${searchRes.data!.length} items, first match: ${match.title} -> ${match.id}');
     });
 
-    test('5. Comic details and chapter list parsing (loadInfo) DIAGNOSIS', () async {
-      final comicId = sampleComicId.isNotEmpty ? sampleComicId : '/series/165';
-      print('=== DIAGNOSING FLAME COMICS LOADINFO FOR: $comicId ===');
+    test('5. Comic details and chapter list parsing (loadInfo)', () async {
+      expect(sampleComicId, isNotEmpty, reason: 'Must obtain dynamic comic ID from Explore/Search');
+      final detailsRes = await source.loadComicInfo!(sampleComicId);
+      expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
+      final details = detailsRes.data!;
 
-      // Check parseChaptersCustom raw response via QuickJS
-      final rawChaptersJson = await JsEngine().runCode("""
-        ComicSource.sources.en_flamecomics.fetchNextApi('series/165.json?id=165')
-      """);
-      print('Raw series JSON keys: ${(rawChaptersJson as Map).keys.toList()}');
-      final pageProps = (rawChaptersJson)['pageProps'] as Map;
-      print('pageProps keys: ${pageProps.keys.toList()}');
-      final series = pageProps['series'] as Map;
-      print('series data: title="${series['title']}", author="${series['author']}", chaptersCount=${(pageProps['chapters'] as List).length}');
-      final firstCh = (pageProps['chapters'] as List).first as Map;
-      print('First chapter raw: token="${firstCh['token']}", chapter="${firstCh['chapter']}", title="${firstCh['title']}"');
+      expect(details.title, isNotEmpty);
+      expect(details.subTitle, isNotNull);
+      expect(details.chapters, isNotNull);
+      expect(details.chapters!.allChapters.length, greaterThan(0));
 
-      // Inspect raw chapter response
-      final rawChapterJson = await JsEngine().runCode("""
-        ComicSource.sources.en_flamecomics.fetchNextApi('series/165/${firstCh['token']}.json?id=165&token=${firstCh['token']}')
-      """);
-      print('Raw chapter JSON keys: ${(rawChapterJson as Map).keys.toList()}');
-      final chPageProps = (rawChapterJson)['pageProps'] as Map;
-      print('Chapter pageProps keys: ${chPageProps.keys.toList()}');
-      print('Chapter pageProps content: $chPageProps');
+      final allChapters = details.chapters!.allChapters;
+      final keys = allChapters.keys.toList();
+      sampleEpId = keys.last;
+      expect(sampleEpId, isNotEmpty, reason: 'Must extract real epId from returned chapter map');
     });
 
     test('6. Episode pages loading (loadEp) & Image Download via AppDio', () async {
-      final comicId = sampleComicId.isNotEmpty ? sampleComicId : '/series/165';
-      final testImageUrl = 'https://cdn.flamecomics.xyz/uploads/images/series/165/26f4cb97a437d7cb/30YRS-11-00.jpg?1786898318';
-      print('Testing Real Image Download with Referer header: $testImageUrl');
+      expect(sampleComicId, isNotEmpty, reason: 'Must have dynamic comic ID');
+      expect(sampleEpId, isNotEmpty, reason: 'Must have dynamic epId from loadInfo');
 
-      // Verify onImageLoad Referer header
-      final imageConfig = await source.getImageLoadingConfig!(testImageUrl, comicId, '/series/165/26f4cb97a437d7cb');
+      final pagesRes = await source.loadComicPages!(sampleComicId, sampleEpId);
+      expect(pagesRes.error, isFalse, reason: 'loadEp error: ${pagesRes.errorMessage}');
+      expect(pagesRes.data, isNotEmpty);
+
+      final firstImage = pagesRes.data!.first;
+      expect(firstImage, startsWith('https://cdn.flamecomics.xyz'));
+
+      final imageConfig = await source.getImageLoadingConfig!(firstImage, sampleComicId, sampleEpId);
       expect(imageConfig, isNotNull);
       final headers = (imageConfig as Map)['headers'] as Map?;
       expect(headers, isNotNull);
       expect(headers!['Referer'], contains('flamecomics.xyz'));
-      print('onImageLoad Referer Header: ${headers['Referer']}');
 
-      // Real Image HTTP download using AppDio with headers (Reader image pipeline)
       final response = await AppDio().get<List<int>>(
-        testImageUrl,
+        firstImage,
         options: Options(
           responseType: ResponseType.bytes,
           headers: Map<String, dynamic>.from(headers),
@@ -165,21 +155,15 @@ void main() {
       expect(response.statusCode, equals(200));
       expect(response.data, isNotNull);
       expect(response.data!.length, greaterThan(500));
-      // Verify JPEG magic bytes: 0xFF, 0xD8, 0xFF
-      expect(response.data![0], equals(0xFF));
-      expect(response.data![1], equals(0xD8));
-      expect(response.data![2], equals(0xFF));
-      print('Reader Image Download SUCCESS: ${response.data!.length} bytes, valid JPEG binary verified!');
+      expect(response.headers.value('content-type'), contains('image/'));
     });
 
-    test('7. BuildId refresh on stale / 404', () async {
-      // Test fetchNextApi cache & buildId acquisition
+    test('7. BuildId auto-refresh resilience on stale / 404', () async {
       final buildIdRes = await JsEngine().runCode("""
         ComicSource.sources.en_flamecomics.getBuildId()
       """);
       expect(buildIdRes, isNotNull);
       expect(buildIdRes.toString(), isNotEmpty);
-      print('Current Flame Comics buildId: $buildIdRes');
 
       // Invalidate buildId in JS engine to test auto-refresh
       await JsEngine().runCode("""
@@ -195,7 +179,6 @@ void main() {
         ComicSource.sources.en_flamecomics._buildId
       """);
       expect(restoredBuildId, isNot(equals('invalid-stale-build-id')));
-      print('Successfully tested buildId auto-refresh! Refreshed buildId: $restoredBuildId');
     });
   });
 }
