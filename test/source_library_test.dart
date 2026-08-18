@@ -9,12 +9,23 @@ void main() {
       expect(a, b);
     });
 
-    test('normalizes case and trailing slashes so the same logical library '
-        'converges to one id across devices', () {
+    test('normalizes scheme, host, and trailing slashes so the same logical '
+        'library converges to one id across devices', () {
       final canonical = stableLibraryId('https://example.com/repo');
-      expect(stableLibraryId('https://Example.com/repo/'), canonical);
+      expect(stableLibraryId('HTTPS://Example.com/repo/'), canonical);
       expect(stableLibraryId('  https://EXAMPLE.com/repo  '), canonical);
       expect(stableLibraryId('https://example.com/repo///'), canonical);
+    });
+
+    test('preserves case-sensitive path and query components', () {
+      expect(
+        stableLibraryId('https://example.com/Repo/index.json'),
+        isNot(stableLibraryId('https://example.com/repo/index.json')),
+      );
+      expect(
+        stableLibraryId('https://example.com/index.json?branch=Main'),
+        isNot(stableLibraryId('https://example.com/index.json?branch=main')),
+      );
     });
 
     test('differs for different URLs', () {
@@ -27,6 +38,39 @@ void main() {
     test('produces a short stable-length token', () {
       expect(stableLibraryId('https://example.com/index.json').length, 12);
       expect(stableLibraryId('').length, 12);
+    });
+  });
+
+  group('allocateLibraryId', () {
+    test(
+      'uses a deterministic full digest when a stale id occupies the hash',
+      () {
+        const url = 'https://example.com/index.json';
+        final base = stableLibraryId(url);
+        final allocated = allocateLibraryId(url, [base]);
+
+        expect(allocated, isNot(base));
+        expect(allocated.length, 32);
+        expect(allocateLibraryId(url, ['other', base]), allocated);
+        expect(allocateLibraryId(url, [base, 'other']), allocated);
+      },
+    );
+
+    test('compares current URLs instead of an id left behind by an edit', () {
+      const oldUrl = 'https://example.com/old/index.json';
+      const currentUrl = 'https://example.com/current/index.json';
+      final editedLibrary = ComicSourceLibrary(
+        id: stableLibraryId(oldUrl),
+        name: 'Edited',
+        url: currentUrl,
+      );
+
+      expect(findLibraryByUrl([editedLibrary], oldUrl), isNull);
+      expect(findLibraryByUrl([editedLibrary], currentUrl), editedLibrary);
+      expect(
+        allocateLibraryId(oldUrl, [editedLibrary.id]),
+        isNot(editedLibrary.id),
+      );
     });
   });
 

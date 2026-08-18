@@ -1,4 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_type.dart';
+import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/webdav_migration_tasks.dart';
 
 // The WebDAV comic source browses a folder tree named by titles; these pure
@@ -121,6 +127,129 @@ void main() {
     });
   });
 
+  group('prepareWebdavMigrationUpload', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('venera_webdav_migration_');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    });
+
+    LocalComic comic({
+      required ComicChapters chapters,
+      required List<String> downloaded,
+    }) => LocalComic(
+      id: 'comic',
+      title: 'Comic',
+      subtitle: '',
+      tags: const [],
+      directory: tempDir.path,
+      chapters: chapters,
+      cover: 'cover.jpg',
+      comicType: ComicType(0),
+      downloadedChapters: downloaded,
+      createdAt: DateTime(2026, 1, 1),
+    );
+
+    String path(String name) => '${tempDir.path}${Platform.pathSeparator}$name';
+
+    test('reports every missing or empty downloaded chapter', () async {
+      final goodDir = Directory(path('good'))..createSync();
+      File(
+        '${goodDir.path}${Platform.pathSeparator}1.jpg',
+      ).writeAsStringSync('page');
+      Directory(path('empty')).createSync();
+      final local = comic(
+        chapters: const ComicChapters({
+          'good': 'Chapter 1',
+          'missing': 'Chapter 2',
+          'empty': 'Chapter 3',
+        }),
+        downloaded: const ['good', 'missing', 'empty'],
+      );
+
+      final plan = await prepareWebdavMigrationUpload(
+        comic: local,
+        comicDir: '/remote/Comic/',
+        numericPrefix: false,
+      );
+
+      expect(plan.uploads, hasLength(1));
+      expect(plan.uploads.single.chapterTitle, 'Chapter 1');
+      expect(
+        plan.failures.map((failure) => (failure.chapterTitle, failure.reason)),
+        containsAll([
+          ('Chapter 2', WebdavMigrationFailureReason.directoryMissing),
+          ('Chapter 3', WebdavMigrationFailureReason.noImages),
+        ]),
+      );
+    });
+
+    test('includes the group name in a grouped chapter failure', () async {
+      final goodDir = Directory(path('volume-1'))..createSync();
+      File(
+        '${goodDir.path}${Platform.pathSeparator}1.jpg',
+      ).writeAsStringSync('page');
+      final local = comic(
+        chapters: const ComicChapters.grouped({
+          'Volumes': {'volume-1': 'Volume 1', 'volume-2': 'Volume 2'},
+        }),
+        downloaded: const ['volume-1', 'volume-2'],
+      );
+
+      final plan = await prepareWebdavMigrationUpload(
+        comic: local,
+        comicDir: '/remote/Comic/',
+        numericPrefix: true,
+      );
+
+      expect(plan.failures, hasLength(1));
+      expect(plan.failures.single.chapterTitle, 'Volumes / Volume 2');
+      expect(
+        plan.failures.single.reason,
+        WebdavMigrationFailureReason.directoryMissing,
+      );
+      final groupIndex = plan.remoteDirectories.indexOf(
+        '/remote/Comic/1_Volumes/',
+      );
+      final chapterIndex = plan.remoteDirectories.indexOf(
+        '/remote/Comic/1_Volumes/1_Volume 1/',
+      );
+      expect(groupIndex, greaterThanOrEqualTo(0));
+      expect(chapterIndex, greaterThan(groupIndex));
+    });
+  });
+
+  test('migration failure strings cover every translated locale', () {
+    final data = jsonDecode(
+      File('assets/translation.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    const keys = [
+      'Completed with failures',
+      'Failed items',
+      'Copy failure details',
+      'Failure details copied',
+      'Failed to copy failure details',
+      '@count more failure items; copy details to view all',
+      'Local comic is no longer available',
+      'Local files directory is missing',
+      'No readable images were found',
+      'Failed to read local files',
+      'Failed to upload files',
+      'Migration failed',
+    ];
+
+    for (final locale in ['zh_CN', 'zh_TW']) {
+      final translations = data[locale] as Map<String, dynamic>;
+      for (final key in keys) {
+        expect(translations[key], isNotEmpty, reason: '$locale: $key');
+      }
+    }
+  });
+
   // The skip-existing choice and the comics it excluded must survive a restart:
   // the decision is made once and then frozen, so losing it would let a resume
   // re-decide against folders the task itself created (#160).
@@ -150,6 +279,65 @@ void main() {
       expect(restored.doneKeys, contains('a_0'));
     });
 
+    test('round-trips structured failure details', () {
+      final task = newTask(skipExisting: false)
+        ..failedCount = 1
+        ..doneKeys.add('a_0')
+        ..failures.add(
+          const WebdavMigrationFailure(
+            comicKey: 'a_0',
+            comicTitle: 'A',
+            chapterTitle: 'Volume 2',
+            reason: WebdavMigrationFailureReason.directoryMissing,
+          ),
+        );
+
+      final restored = WebdavMigrationTask.fromJson(task.toJson());
+
+      expect(restored.failedCount, 1);
+      expect(restored.failures, hasLength(1));
+      expect(restored.failures.single.comicTitle, 'A');
+      expect(restored.failures.single.chapterTitle, 'Volume 2');
+      expect(
+        restored.failures.single.reason,
+        WebdavMigrationFailureReason.directoryMissing,
+      );
+    });
+
+    test('preserves a completed task with mixed outcomes', () {
+      final task = WebdavMigrationTask(
+        id: 'mixed',
+        comics: [
+          MigrationComicRef(id: 'a', comicTypeValue: 0, title: 'A'),
+          MigrationComicRef(id: 'b', comicTypeValue: 0, title: 'B'),
+          MigrationComicRef(id: 'c', comicTypeValue: 0, title: 'C'),
+        ],
+        createdAt: DateTime(2026, 1, 1),
+        numericPrefix: true,
+        skipExisting: false,
+        librarySourceKey: 'webdav_lib',
+        doneKeys: {'a_0', 'b_0', 'c_0'},
+        failedCount: 1,
+        status: WebdavMigrationStatus.completed,
+        failures: const [
+          WebdavMigrationFailure(
+            comicKey: 'b_0',
+            comicTitle: 'B',
+            chapterTitle: 'Chapter 2',
+            reason: WebdavMigrationFailureReason.noImages,
+          ),
+        ],
+      );
+
+      final restored = WebdavMigrationTask.fromJson(task.toJson());
+
+      expect(restored.status, WebdavMigrationStatus.completed);
+      expect(restored.done, 3);
+      expect(restored.failedCount, 1);
+      expect(restored.failures.single.comicKey, 'b_0');
+      expect(restored.progress, 1);
+    });
+
     test('keeps an unresolved decision unresolved', () {
       final restored =
           WebdavMigrationTask.fromJson(newTask(skipExisting: true).toJson());
@@ -168,5 +356,16 @@ void main() {
       expect(restored.skipExisting, isFalse);
       expect(restored.skippedKeys, isNull);
     });
+
+    test(
+      'a task saved before failure details existed restores an empty list',
+      () {
+        final json = newTask(skipExisting: false).toJson()..remove('failures');
+
+        final restored = WebdavMigrationTask.fromJson(json);
+
+        expect(restored.failures, isEmpty);
+      },
+    );
   });
 }
