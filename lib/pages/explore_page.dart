@@ -114,27 +114,7 @@ class _ExplorePageState extends State<ExplorePage>
   );
 
   Tab buildTab(String i) {
-    var id = ExplorePageIdentity.tryParse(i);
-    if (id == null) {
-      return Tab(text: i, key: Key(i));
-    }
-
-    var comicSource = ComicSource.find(id.sourceKey);
-    if (comicSource == null) {
-      return Tab(text: id.title, key: Key(i));
-    }
-
-    var text = id.title.ts(comicSource.key);
-
-    var allEnabledWithSameTitle = pages
-        .map(ExplorePageIdentity.tryParse)
-        .where((e) => e != null && e.title.ts(e.sourceKey) == text)
-        .length;
-
-    if (allEnabledWithSameTitle > 1) {
-      text = '\${comicSource.name} · $text';
-    }
-
+    var text = getExploreTabLabel(i, pages);
     return Tab(text: text, key: Key(i));
   }
 
@@ -639,4 +619,29 @@ class _MultiPartExplorePageState extends State<_MultiPartExplorePage> {
       yield* _buildExplorePagePart(context, part, widget.comicSourceKey);
     }
   }
+}
+
+String getExploreTabLabel(String i, List<String> pages) {
+  var id = ExplorePageIdentity.tryParse(i);
+  if (id == null) {
+    return i;
+  }
+
+  var comicSource = ComicSource.find(id.sourceKey);
+  if (comicSource == null) {
+    return id.title;
+  }
+
+  var text = id.title.ts(comicSource.key);
+
+  var allEnabledWithSameTitle = pages
+      .map(ExplorePageIdentity.tryParse)
+      .where((e) => e != null && e.title.ts(e.sourceKey) == text)
+      .length;
+
+  if (allEnabledWithSameTitle > 1) {
+    text = '${comicSource.name} · $text';
+  }
+
+  return text;
 }
