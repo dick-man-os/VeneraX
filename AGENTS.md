@@ -221,6 +221,72 @@ Never:
 
 Use existing secure/configuration mechanisms.
 
+## Multi-agent working-tree ownership
+
+- Only one modifying AI agent may own a working tree at a time.
+- Codex, Antigravity, Copilot, DeepSeek-backed agents, or other agents must not simultaneously modify the same working tree.
+- Parallel implementation requires separate Git worktrees / branches.
+- Read-only agents may inspect concurrently only if they do not mutate repository or runtime state.
+
+## Agent startup protocol
+
+Before modifying code, every incoming agent must:
+
+1. Read `AGENTS.md`.
+2. Read `.ai/handoff/current.md` if it exists.
+3. Run/read `git status --short`.
+4. Confirm current branch.
+5. Confirm current HEAD.
+6. Inspect relevant `git diff`.
+7. Verify working-tree state agrees with handoff state.
+
+If the working tree contains unexplained changes:
+STOP and report the discrepancy.
+
+## Handoff protocol
+
+A handoff is required whenever:
+- an agent pauses unfinished work,
+- quota is nearly exhausted or exhausted,
+- the user switches AI provider/account,
+- work is intentionally transferred to another agent,
+- a blocker prevents completion.
+
+The outgoing agent must record enough state in `.ai/handoff/current.md` (using `.ai/handoff/TEMPLATE.md`) for another agent to continue without chat history.
+
+## Verification gate
+
+Before declaring implementation complete or ready for handoff:
+
+1. Inspect `git diff`.
+2. Run `git diff --check`.
+3. Run `flutter analyze`.
+4. Run the narrowest relevant tests.
+5. For comic-source/runtime changes, run the appropriate runtime validation when feasible.
+6. Run `git status --short`.
+
+Passing verification must NOT be interpreted as permission to commit or push.
+
+## Generated files policy
+
+- Do not manually edit generated/build artifacts unless they are explicitly the authoritative source for the task.
+- Prefer modifying source inputs and regenerating through the repository's intended mechanism.
+- Do not introduce generated/temp artifacts into Git accidentally.
+
+## Secrets and local agent configuration
+
+Never store:
+- API keys
+- DeepSeek credentials
+- Codex authentication
+- Google authentication
+- GitHub tokens
+- cookies/session credentials
+
+in `AGENTS.md`, handoff documents, tracked logs, tracked source files, or Git history.
+
+Provider/authentication configuration must remain machine-local unless a future task explicitly creates a safe, secret-free project configuration.
+
 ## Final rule
 
 When safety, repository ownership, scope, or intended architecture is ambiguous:

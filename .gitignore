@@ -68,3 +68,14 @@ app_chapters_raw.json
 
 # Icon generation scratch dir (scripts, source images, build log)
 .icon_work/
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Local multi-agent handoff state
+.ai/handoff/current.md
+.ai/scratch/
+.ai/logs/
