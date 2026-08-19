@@ -7,6 +7,7 @@ import 'package:flutter_saf/flutter_saf.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_source/explore_identity.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/image_enhance_shader.dart';
 import 'package:venera/foundation/image_translation/pre_translation_tasks.dart';
@@ -103,6 +104,16 @@ void _checkOldConfigs() {
         .where((e) => e.searchPageData != null)
         .map((e) => e.key)
         .toList();
+  }
+
+  // Migrate legacy explore_pages titles to composite identities
+  var explorePages = appdata.settings['explore_pages'];
+  if (explorePages is List) {
+    var newExplorePages = ExplorePageIdentity.migrateLegacyList(explorePages, ComicSource.all());
+    if (newExplorePages != null) {
+      appdata.settings['explore_pages'] = newExplorePages;
+      appdata.saveData();
+    }
   }
 
   if (appdata.implicitData['webdavAutoSync'] == null) {

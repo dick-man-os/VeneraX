@@ -257,7 +257,8 @@ Widget setExplorePagesWidget() {
   var pages = <String, String>{};
   for (var c in ComicSource.all()) {
     for (var page in c.explorePages) {
-      pages[page.title] = page.title.ts(c.key);
+      final id = '${c.key}::${page.title}';
+      pages[id] = '${c.name} · ${page.title.ts(c.key)}';
     }
   }
   return _MultiPagesFilter(

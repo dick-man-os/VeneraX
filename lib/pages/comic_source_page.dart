@@ -9,6 +9,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_collection_store.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_source/explore_identity.dart';
 import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/foundation/comic_source_update_tasks.dart';
 import 'package:venera/foundation/log.dart';
@@ -1634,7 +1635,7 @@ void _validatePages() {
   List networkFavorites = appdata.settings['favorites'];
 
   var totalExplorePages = ComicSource.all()
-      .map((e) => e.explorePages.map((e) => e.title))
+      .map((e) => e.explorePages.map((p) => ExplorePageIdentity.create(e.key, p.title)))
       .expand((element) => element)
       .toList();
   var totalCategoryPages = ComicSource.all()
@@ -1649,7 +1650,13 @@ void _validatePages() {
       .toList();
 
   for (var page in List.from(explorePages)) {
-    if (!totalExplorePages.contains(page)) {
+    var normalized = ExplorePageIdentity.normalize(page.toString(), ComicSource.all());
+    if (normalized != page) {
+      explorePages.remove(page);
+      if (totalExplorePages.contains(normalized) && !explorePages.contains(normalized)) {
+        explorePages.add(normalized);
+      }
+    } else if (!totalExplorePages.contains(page)) {
       explorePages.remove(page);
     }
   }
@@ -1679,8 +1686,9 @@ void _addAllPagesWithComicSource(ComicSource source) {
 
   if (source.explorePages.isNotEmpty) {
     for (var page in source.explorePages) {
-      if (!explorePages.contains(page.title)) {
-        explorePages.add(page.title);
+      var id = ExplorePageIdentity.create(source.key, page.title);
+      if (!explorePages.contains(id)) {
+        explorePages.add(id);
       }
     }
   }

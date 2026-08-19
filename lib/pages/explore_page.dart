@@ -3,6 +3,7 @@ import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_source/explore_identity.dart';
 import 'package:venera/foundation/global_state.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/pages/comic_source_page.dart';
@@ -30,8 +31,8 @@ class _ExplorePageState extends State<ExplorePage>
   void onSettingsChanged() {
     var explorePages = List<String>.from(appdata.settings["explore_pages"]);
     var all = ComicSource.all()
-        .map((e) => e.explorePages)
-        .expand((e) => e.map((e) => e.title))
+        .map((e) => e.explorePages.map((p) => ExplorePageIdentity.create(e.key, p.title)))
+        .expand((e) => e)
         .toList();
     explorePages = explorePages.where((e) => all.contains(e)).toList();
     if (!pages.isEqualTo(explorePages)) {
@@ -68,8 +69,8 @@ class _ExplorePageState extends State<ExplorePage>
   void initState() {
     pages = List<String>.from(appdata.settings["explore_pages"]);
     var all = ComicSource.all()
-        .map((e) => e.explorePages)
-        .expand((e) => e.map((e) => e.title))
+        .map((e) => e.explorePages.map((p) => ExplorePageIdentity.create(e.key, p.title)))
+        .expand((e) => e)
         .toList();
     pages = pages.where((e) => all.contains(e)).toList();
     controller = TabController(length: pages.length, vsync: this);
@@ -113,10 +114,28 @@ class _ExplorePageState extends State<ExplorePage>
   );
 
   Tab buildTab(String i) {
-    var comicSource = ComicSource.all().firstWhere(
-      (e) => e.explorePages.any((e) => e.title == i),
-    );
-    return Tab(text: i.ts(comicSource.key), key: Key(i));
+    var id = ExplorePageIdentity.tryParse(i);
+    if (id == null) {
+      return Tab(text: i, key: Key(i));
+    }
+
+    var comicSource = ComicSource.find(id.sourceKey);
+    if (comicSource == null) {
+      return Tab(text: id.title, key: Key(i));
+    }
+
+    var text = id.title.ts(comicSource.key);
+
+    var allEnabledWithSameTitle = pages
+        .map(ExplorePageIdentity.tryParse)
+        .where((e) => e != null && e.title.ts(e.sourceKey) == text)
+        .length;
+
+    if (allEnabledWithSameTitle > 1) {
+      text = '\${comicSource.name} · $text';
+    }
+
+    return Tab(text: text, key: Key(i));
   }
 
   Widget buildBody(String i) =>
@@ -271,17 +290,21 @@ class _SingleExplorePageState extends AutomaticGlobalState<_SingleExplorePage>
   @override
   void initState() {
     super.initState();
-    for (var source in ComicSource.all()) {
-      for (var d in source.explorePages) {
-        if (d.title == widget.title) {
-          data = d;
-          comicSourceKey = source.key;
-          appdata.settings.addListener(onSettingsChanged);
-          return;
+    var id = ExplorePageIdentity.tryParse(widget.title);
+    if (id != null) {
+      var source = ComicSource.find(id.sourceKey);
+      if (source != null) {
+        for (var d in source.explorePages) {
+          if (d.title == id.title) {
+            data = d;
+            comicSourceKey = source.key;
+            appdata.settings.addListener(onSettingsChanged);
+            return;
+          }
         }
       }
     }
-    throw "Explore Page ${widget.title} Not Found!";
+    throw "Explore Page \${widget.title} Not Found!";
   }
 
   @override
