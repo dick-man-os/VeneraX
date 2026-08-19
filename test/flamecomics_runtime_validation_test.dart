@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,7 +65,7 @@ void main() {
 
       expect(source.key, equals('en_flamecomics'));
       expect(source.name, equals('Flame Comics'));
-      expect(source.version, equals('1.0.1'));
+      expect(source.version, equals('1.0.2'));
       expect(source.explorePages, isNotEmpty);
       expect(source.searchPageData, isNotNull);
       expect(source.searchPageData!.loadPage, isNotNull);
@@ -83,7 +81,7 @@ void main() {
       final res = await popularExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Popular error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       expect(first.cover, startsWith('http'));
@@ -96,7 +94,7 @@ void main() {
       final res = await latestExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Latest error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       expect(first.cover, startsWith('http'));
@@ -106,7 +104,7 @@ void main() {
       final searchRes = await source.searchPageData!.loadPage!('solo', 1, <String>[]);
       expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
       expect(searchRes.data, isNotEmpty);
-      final match = searchRes.data!.first;
+      final match = searchRes.data.first;
       expect(match.title, isNotEmpty);
       expect(match.id, isNotEmpty);
     });
@@ -115,7 +113,7 @@ void main() {
       expect(sampleComicId, isNotEmpty, reason: 'Must obtain dynamic comic ID from Explore/Search');
       final detailsRes = await source.loadComicInfo!(sampleComicId);
       expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data!;
+      final details = detailsRes.data;
 
       expect(details.title, isNotEmpty);
       expect(details.subTitle, isNotNull);
@@ -136,7 +134,7 @@ void main() {
       expect(pagesRes.error, isFalse, reason: 'loadEp error: ${pagesRes.errorMessage}');
       expect(pagesRes.data, isNotEmpty);
 
-      final firstImage = pagesRes.data!.first;
+      final firstImage = pagesRes.data.first;
       expect(firstImage, startsWith('https://cdn.flamecomics.xyz'));
 
       final imageConfig = await source.getImageLoadingConfig!(firstImage, sampleComicId, sampleEpId);
@@ -156,6 +154,16 @@ void main() {
       expect(response.data, isNotNull);
       expect(response.data!.length, greaterThan(500));
       expect(response.headers.value('content-type'), contains('image/'));
+    });
+
+    test('8. Search for missing comic returns empty results', () async {
+      final searchRes = await source.searchPageData!.loadPage!(
+        'ZZZ_MISSING_COMIC_TEST_001',
+        1,
+        <String>[]
+      );
+      expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
+      expect(searchRes.data, isEmpty, reason: 'Search for missing comic should return empty list');
     });
 
     test('7. BuildId auto-refresh resilience on stale / 404', () async {

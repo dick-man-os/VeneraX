@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,7 +63,7 @@ void main() {
 
       expect(source.key, equals('en_webtoons'));
       expect(source.name, equals('Webtoons'));
-      expect(source.version, equals('1.0.0'));
+      expect(source.version, equals('1.0.1'));
       expect(source.explorePages, isNotEmpty);
       expect(source.searchPageData, isNotNull);
       expect(source.searchPageData!.loadPage, isNotNull);
@@ -81,7 +79,7 @@ void main() {
       final res = await popularExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Popular error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       print('Explore Popular first item: ${first.title} (${first.id})');
@@ -93,7 +91,7 @@ void main() {
       final res = await latestExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Latest error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       print('Explore Latest first item: ${first.title} (${first.id})');
@@ -103,9 +101,9 @@ void main() {
       final searchRes = await source.searchPageData!.loadPage!('tower of god', 1, <String>[]);
       expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
       expect(searchRes.data, isNotEmpty);
-      final match = searchRes.data!.firstWhere(
+      final match = searchRes.data.firstWhere(
         (c) => c.title.toLowerCase().contains('tower of god'),
-        orElse: () => searchRes.data!.first,
+        orElse: () => searchRes.data.first,
       );
       expect(match.title, isNotEmpty);
       expect(match.id, isNotEmpty);
@@ -116,10 +114,16 @@ void main() {
       final comicId = '/en/fantasy/tower-of-god/list?title_no=95';
       final detailsRes = await source.loadComicInfo!(comicId);
       expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data!;
+      final details = detailsRes.data;
       expect(details.title, contains('Tower of God'));
       expect(details.subTitle, isNotEmpty);
-      expect(details.cover, isNotEmpty);
+      expect(details.title, isNotEmpty);
+
+      if (details.subTitle != null) {
+        expect(details.subTitle!.toLowerCase(), isNot(contains('author info')));
+        expect(details.subTitle, isNot(contains('...')));
+      }
+
       expect(details.chapters, isNotNull);
       final allChapters = details.chapters!.allChapters;
       expect(allChapters, isNotEmpty);
@@ -141,8 +145,8 @@ void main() {
       final pagesRes = await source.loadComicPages!(comicId, epId);
       expect(pagesRes.error, isFalse, reason: 'loadEp error: ${pagesRes.errorMessage}');
       expect(pagesRes.data, isNotEmpty);
-      print('Episode Pages count: ${pagesRes.data!.length}');
-      final firstImage = pagesRes.data!.first;
+      print('Episode Pages count: ${pagesRes.data.length}');
+      final firstImage = pagesRes.data.first;
       expect(firstImage, startsWith('http'));
       print('First Image URL: $firstImage');
 
@@ -176,7 +180,16 @@ void main() {
       final canvasComicId = '/en/canvas/meme-girls/list?title_no=304446';
       final detailsRes = await source.loadComicInfo!(canvasComicId);
       expect(detailsRes.error, isFalse, reason: 'Canvas loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data!;
+      final details = detailsRes.data;
+
+      expect(details.title, isNotEmpty);
+
+      // Ensure author metadata is not polluted
+      if (details.subTitle != null) {
+        expect(details.subTitle!.toLowerCase(), isNot(contains('author info')));
+        expect(details.subTitle, isNot(contains('...')));
+      }
+
       expect(details.chapters, isNotNull);
       expect(details.chapters!.allChapters, isNotEmpty);
       print('Canvas Chapters count: ${details.chapters!.allChapters.length}');

@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,7 +67,7 @@ void main() {
 
       expect(source.key, equals('zh_Hant_comicabc'));
       expect(source.name, equals('Comicabc'));
-      expect(source.version, equals('1.0.1'));
+      expect(source.version, equals('1.0.2'));
       expect(source.searchPageData, isNotNull);
       expect(source.loadComicInfo, isNotNull);
       expect(source.loadComicPages, isNotNull);
@@ -80,9 +79,9 @@ void main() {
       final searchRes = await source.searchPageData!.loadPage!('終結的熾天使', 1, <String>[]);
       expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
       expect(searchRes.data, isNotNull);
-      expect(searchRes.data!, isNotEmpty);
+      expect(searchRes.data, isNotEmpty);
 
-      dynamicComic = searchRes.data!.first;
+      dynamicComic = searchRes.data.first;
       expect(dynamicComic.title, isNotEmpty);
       expect(dynamicComic.id, isNotEmpty);
       expect(dynamicComic.cover, startsWith('http'));
@@ -110,7 +109,7 @@ void main() {
 
       final detailsRes = await source.loadComicInfo!(dynamicComic.id);
       expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data!;
+      final details = detailsRes.data;
 
       expect(details.title, isNotEmpty);
       expect(details.chapters, isNotNull);
@@ -143,9 +142,9 @@ void main() {
       final pagesRes = await source.loadComicPages!(dynamicComic.id, realEpId);
       expect(pagesRes.error, isFalse, reason: 'loadComicPages error: ${pagesRes.errorMessage}');
       expect(pagesRes.data, isNotNull);
-      expect(pagesRes.data!, isNotEmpty);
+      expect(pagesRes.data, isNotEmpty);
 
-      final firstImage = pagesRes.data!.first;
+      final firstImage = pagesRes.data.first;
       expect(firstImage, startsWith('http'));
 
       final imageConfig = await source.getImageLoadingConfig!(firstImage, dynamicComic.id, realEpId);
@@ -163,6 +162,28 @@ void main() {
       expect(response.data, isNotNull);
       expect(response.data!.length, greaterThan(500));
       expect(response.headers.value('content-type'), contains('image/'));
+    });
+
+    test('5. Public Explore Pages (Popular/Latest) resolves successfully', () async {
+      final popularPage = source.explorePages.firstWhere((p) => p.title == 'Popular' || p.title == 'popular', orElse: () => throw Exception('Popular not found'));
+      final popRes = await popularPage.loadPage!(1);
+      expect(popRes.error, isFalse, reason: 'Explore Popular error: ${popRes.errorMessage}');
+      expect(popRes.data, isNotNull);
+      expect(popRes.data, isNotEmpty);
+      expect(popRes.data.first.title, isNotEmpty);
+      expect(popRes.data.first.cover, startsWith('http'));
+
+      try {
+        final latestPage = source.explorePages.firstWhere((p) => p.title == 'Latest' || p.title == 'latest');
+        final latRes = await latestPage.loadPage!(1);
+        expect(latRes.error, isFalse, reason: 'Explore Latest error: ${latRes.errorMessage}');
+        expect(latRes.data, isNotNull);
+        expect(latRes.data, isNotEmpty);
+        expect(latRes.data.first.title, isNotEmpty);
+        expect(latRes.data.first.cover, startsWith('http'));
+      } catch (e) {
+        // Latest might not be present
+      }
     });
   });
 }

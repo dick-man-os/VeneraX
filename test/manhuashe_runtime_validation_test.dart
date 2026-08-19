@@ -1,7 +1,5 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -92,7 +90,7 @@ void main() {
       final res = await popularExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Popular error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       expect(first.cover, isNotEmpty);
@@ -105,7 +103,7 @@ void main() {
       final res = await latestExplore.loadPage!(1);
       expect(res.error, isFalse, reason: 'Explore Latest error: ${res.errorMessage}');
       expect(res.data, isNotEmpty);
-      final first = res.data!.first;
+      final first = res.data.first;
       expect(first.title, isNotEmpty);
       expect(first.id, isNotEmpty);
       print('Explore Latest first item: ${first.title} (${first.id})');
@@ -115,16 +113,26 @@ void main() {
       final searchRes = await source.searchPageData!.loadPage!('一人', 1, <String>[]);
       expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
       expect(searchRes.data, isNotEmpty);
-      final match = searchRes.data!.first;
+      final match = searchRes.data.first;
       expect(match.title, isNotEmpty);
       expect(match.id, isNotEmpty);
       print('Search match: ${match.title} -> ${match.id}');
     });
 
+    test('8. Search for missing comic returns empty results', () async {
+      final searchRes = await source.searchPageData!.loadPage!(
+        'ZZZ_MISSING_COMIC_TEST_001',
+        1,
+        <String>[]
+      );
+      expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
+      expect(searchRes.data, isEmpty, reason: 'Search for missing comic should return empty list');
+    });
+
     test('5. Comic details and chapter list parsing (loadInfo)', () async {
       final detailsRes = await source.loadComicInfo!(firstComicId);
       expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data!;
+      final details = detailsRes.data;
       expect(details.title, isNotEmpty);
       expect(details.subTitle, isNotEmpty, reason: 'Patched author should exist');
       expect(details.cover, isNotEmpty);
@@ -150,7 +158,7 @@ void main() {
       final pagesRes = await source.loadComicPages!(firstComicId, firstChapterId);
       expect(pagesRes.error, isFalse, reason: 'loadEp error: ${pagesRes.errorMessage}');
       expect(pagesRes.data, isNotEmpty);
-      final firstImage = pagesRes.data!.first;
+      final firstImage = pagesRes.data.first;
       expect(firstImage, startsWith('http'));
       print('First Image URL: $firstImage');
 
@@ -178,7 +186,7 @@ void main() {
        final res = await popularExplore.loadPage!(1);
        expect(res.error, isFalse, reason: 'Explore Popular on secondary mirror error: ${res.errorMessage}');
        expect(res.data, isNotEmpty);
-       print('Secondary mirror loaded ${res.data!.length} comics successfully.');
+       print('Secondary mirror loaded ${res.data.length} comics successfully.');
 
        appdata.settings['source_baseUrlSelection_${source.key}'] = 'https://www.311s.com';
     });
