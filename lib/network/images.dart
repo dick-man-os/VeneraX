@@ -179,10 +179,10 @@ abstract class ImageDownloader {
         totalBytes: data.length,
         imageBytes: data,
       );
-      // A download reuses an already-cached image instead of re-fetching it,
-      // and never re-caches (avoids double-writing the bytes to disk and
-      // evicting the reader's prefetch cache) — see #4 / #17.
-      if (forDownload) return;
+      // A valid cache hit is complete for every consumer. In particular, the
+      // shared stream wrapper keeps consuming after an individual reader stops
+      // listening, so falling through here would silently re-fetch the image.
+      return;
     }
 
     Future<Map<String, dynamic>?> Function()? onLoadFailed;
