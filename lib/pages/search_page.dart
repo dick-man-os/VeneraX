@@ -629,24 +629,27 @@ class _SearchHistoryState extends State<_SearchHistory> {
   }
 
   Widget buildItem(int index) {
+    final keyword = appdata.searchHistory[index];
+
+    void deleteItem() {
+      appdata.removeSearchHistory(keyword);
+      setState(() {});
+    }
+
     void showMenu(Offset offset) {
       showMenuX(context, offset, [
         MenuEntry(
           icon: Icons.copy,
           text: 'Copy'.tl,
           onClick: () {
-            Clipboard.setData(
-              ClipboardData(text: appdata.searchHistory[index]),
-            );
+            Clipboard.setData(ClipboardData(text: keyword));
           },
         ),
         MenuEntry(
           icon: Icons.delete,
           text: 'Delete'.tl,
           onClick: () {
-            appdata.removeSearchHistory(appdata.searchHistory[index]);
-            appdata.saveData();
-            setState(() {});
+            deleteItem();
           },
         ),
       ]);
@@ -656,7 +659,7 @@ class _SearchHistoryState extends State<_SearchHistory> {
       builder: (context) {
         return InkWell(
           onTap: () {
-            widget.search(appdata.searchHistory[index]);
+            widget.search(keyword);
           },
           onLongPress: () {
             var renderBox = context.findRenderObject() as RenderBox;
@@ -682,7 +685,23 @@ class _SearchHistoryState extends State<_SearchHistory> {
               ),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Text(appdata.searchHistory[index], style: ts.s14),
+            child: Row(
+              children: [
+                Expanded(child: Text(keyword, style: ts.s14)),
+                Tooltip(
+                  message: 'Delete'.tl,
+                  child: IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    padding: EdgeInsets.zero,
+                    onPressed: deleteItem,
+                  ),
+                ),
+              ],
+            ),
           ),
         ).paddingBottom(8).paddingHorizontal(4);
       },
