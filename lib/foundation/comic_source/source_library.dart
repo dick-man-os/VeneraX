@@ -64,6 +64,7 @@ class SourceProvenance {
     List<String>? libraryIds,
     this.originId,
     this.updateLibraryId,
+    this.artifactFileName,
   }) : libraryIds = libraryIds ?? [];
 
   /// Every enabled library whose catalog currently lists this key. Rebuilt on
@@ -75,14 +76,20 @@ class SourceProvenance {
   /// and the removal-cascade fallback.
   String? originId;
 
-  /// The library that won update-URL resolution (lowest priority among
-  /// [libraryIds]). Recomputed on each check.
+  /// The library selected for updates. Retained for inferred legacy sources
+  /// without an origin so artifact ownership survives restart.
   String? updateLibraryId;
+
+  /// Exact `fileName` of the catalog artifact occupying this runtime-key slot.
+  /// Null only for sideloaded sources and records created before artifact-aware
+  /// provenance was introduced.
+  String? artifactFileName;
 
   Map<String, dynamic> toJson() => {
     'libraryIds': libraryIds,
     'originId': originId,
     'updateLibraryId': updateLibraryId,
+    'artifactFileName': artifactFileName,
   };
 
   factory SourceProvenance.fromJson(Map<String, dynamic> json) {
@@ -92,8 +99,260 @@ class SourceProvenance {
           [],
       originId: json['originId']?.toString(),
       updateLibraryId: json['updateLibraryId']?.toString(),
+      artifactFileName: json['artifactFileName']?.toString(),
     );
   }
+}
+
+/// One concrete artifact offered by a source library.
+///
+/// A runtime key can have several artifacts, so callers must keep these as a
+/// list until [resolveCatalogArtifact] has selected the installed identity.
+class CatalogSourceArtifact {
+  const CatalogSourceArtifact({
+    required this.libraryId,
+    required this.runtimeKey,
+    required this.fileName,
+    required this.version,
+    required this.downloadUrl,
+  });
+
+  final String libraryId;
+  final String runtimeKey;
+  final String fileName;
+  final String version;
+
+  /// Resolved URL, or an empty string for a malformed catalog entry. Malformed
+  /// siblings remain candidates so they cannot create false uniqueness.
+  final String downloadUrl;
+}
+
+enum CatalogArtifactResolutionStatus {
+  selected,
+  missing,
+  ambiguous,
+  unreachable,
+}
+
+/// Explicit artifact-resolution result. Unresolved states are intentionally
+/// distinct so ambiguity cannot be mistaken for an ordinary "no update".
+class CatalogArtifactResolution {
+  const CatalogArtifactResolution._(this.status, [this.artifact]);
+
+  const CatalogArtifactResolution.selected(CatalogSourceArtifact artifact)
+    : this._(CatalogArtifactResolutionStatus.selected, artifact);
+
+  const CatalogArtifactResolution.missing()
+    : this._(CatalogArtifactResolutionStatus.missing);
+
+  const CatalogArtifactResolution.ambiguous()
+    : this._(CatalogArtifactResolutionStatus.ambiguous);
+
+  const CatalogArtifactResolution.unreachable()
+    : this._(CatalogArtifactResolutionStatus.unreachable);
+
+  final CatalogArtifactResolutionStatus status;
+  final CatalogSourceArtifact? artifact;
+
+  bool get isSelected => status == CatalogArtifactResolutionStatus.selected;
+}
+
+/// Resolves the exact artifact occupying [runtimeKey] in [libraryId].
+///
+/// [installedFileName] is a legacy-only hint. Fresh catalog installations must
+/// persist [artifactFileName] directly instead of deriving it from a disk path.
+CatalogArtifactResolution resolveCatalogArtifact({
+  required String libraryId,
+  required String runtimeKey,
+  required Iterable<CatalogSourceArtifact> artifacts,
+  required bool libraryReachable,
+  String? artifactFileName,
+  String? installedFileName,
+}) {
+  if (!libraryReachable) {
+    return const CatalogArtifactResolution.unreachable();
+  }
+  final candidates = artifacts
+      .where(
+        (artifact) =>
+            artifact.libraryId == libraryId &&
+            artifact.runtimeKey == runtimeKey,
+      )
+      .toList();
+
+  if (artifactFileName != null) {
+    final exact = candidates
+        .where((artifact) => artifact.fileName == artifactFileName)
+        .toList();
+    if (exact.length == 1) {
+      return exact.single.downloadUrl.isEmpty
+          ? const CatalogArtifactResolution.missing()
+          : CatalogArtifactResolution.selected(exact.single);
+    }
+    return exact.isEmpty
+        ? const CatalogArtifactResolution.missing()
+        : const CatalogArtifactResolution.ambiguous();
+  }
+
+  if (installedFileName != null) {
+    final basenameMatches = candidates
+        .where((artifact) => artifact.fileName == installedFileName)
+        .toList();
+    if (basenameMatches.length == 1) {
+      return basenameMatches.single.downloadUrl.isEmpty
+          ? const CatalogArtifactResolution.missing()
+          : CatalogArtifactResolution.selected(basenameMatches.single);
+    }
+    if (basenameMatches.length > 1) {
+      return const CatalogArtifactResolution.ambiguous();
+    }
+  }
+
+  if (candidates.length == 1) {
+    return candidates.single.downloadUrl.isEmpty
+        ? const CatalogArtifactResolution.missing()
+        : CatalogArtifactResolution.selected(candidates.single);
+  }
+  return candidates.isEmpty
+      ? const CatalogArtifactResolution.missing()
+      : const CatalogArtifactResolution.ambiguous();
+}
+
+/// Resolves an explicitly chosen alternate library without silently picking
+/// one of its duplicate same-key variants. A library carrying the current
+/// artifact keeps exact identity; otherwise only its sole same-key artifact is
+/// a safe library-level choice.
+CatalogArtifactResolution resolveAlternateLibraryArtifact({
+  required String libraryId,
+  required String runtimeKey,
+  required Iterable<CatalogSourceArtifact> artifacts,
+  required bool libraryReachable,
+  String? currentArtifactFileName,
+  String? installedFileName,
+}) {
+  final candidates = artifacts
+      .where(
+        (artifact) =>
+            artifact.libraryId == libraryId &&
+            artifact.runtimeKey == runtimeKey,
+      )
+      .toList();
+  final carriesCurrentArtifact =
+      currentArtifactFileName != null &&
+      candidates.any(
+        (artifact) => artifact.fileName == currentArtifactFileName,
+      );
+  return resolveCatalogArtifact(
+    libraryId: libraryId,
+    runtimeKey: runtimeKey,
+    artifacts: candidates,
+    libraryReachable: libraryReachable,
+    artifactFileName: carriesCurrentArtifact ? currentArtifactFileName : null,
+    installedFileName: currentArtifactFileName == null
+        ? installedFileName
+        : null,
+  );
+}
+
+/// Builds the sticky provenance written after a verified catalog install.
+SourceProvenance provenanceForCatalogInstall({
+  required String libraryId,
+  required String artifactFileName,
+  SourceProvenance? previous,
+}) {
+  final provenance = previous ?? SourceProvenance();
+  provenance.originId = libraryId;
+  provenance.updateLibraryId = libraryId;
+  provenance.artifactFileName = artifactFileName;
+  if (!provenance.libraryIds.contains(libraryId)) {
+    provenance.libraryIds.add(libraryId);
+  }
+  return provenance;
+}
+
+/// Ensures a downloaded catalog entry actually installs the runtime slot it
+/// advertised before any provenance is recorded.
+void validateCatalogInstallRuntimeKey({
+  required String catalogRuntimeKey,
+  required String parsedRuntimeKey,
+}) {
+  if (catalogRuntimeKey != parsedRuntimeKey) {
+    throw StateError(
+      "Catalog key '$catalogRuntimeKey' does not match parsed source key '$parsedRuntimeKey'",
+    );
+  }
+}
+
+/// Validates a resolved target against the installed runtime/provenance.
+/// Returns null when execution may proceed, otherwise an actionable reason.
+String? validateCatalogUpdateTarget({
+  required String installedRuntimeKey,
+  required SourceProvenance provenance,
+  required CatalogSourceArtifact? target,
+}) {
+  if (target == null) {
+    return 'No validated catalog artifact target';
+  }
+  if (target.runtimeKey != installedRuntimeKey) {
+    return 'Catalog target runtime key does not match installed source';
+  }
+  final governingLibraryId = provenance.originId ?? provenance.updateLibraryId;
+  if (governingLibraryId == null || target.libraryId != governingLibraryId) {
+    return 'Catalog target library does not match source provenance';
+  }
+  if (provenance.artifactFileName == null ||
+      target.fileName != provenance.artifactFileName) {
+    return 'Catalog target artifact does not match source provenance';
+  }
+  return null;
+}
+
+enum CatalogArtifactInstallState { available, installed, occupied }
+
+/// Artifact-aware catalog-row state. An occupied sibling stays non-actionable
+/// instead of offering an Add button that can only fail duplicate-key checks.
+CatalogArtifactInstallState catalogArtifactInstallState({
+  required CatalogSourceArtifact candidate,
+  required Iterable<CatalogSourceArtifact> libraryArtifacts,
+  required bool runtimeKeyInstalled,
+  required SourceProvenance? provenance,
+  String? installedFileName,
+}) {
+  if (!runtimeKeyInstalled) return CatalogArtifactInstallState.available;
+
+  final artifactFileName = provenance?.artifactFileName;
+  if (artifactFileName != null) {
+    final governingLibraryId =
+        provenance?.originId ?? provenance?.updateLibraryId;
+    if (governingLibraryId != candidate.libraryId) {
+      return CatalogArtifactInstallState.occupied;
+    }
+    final resolution = resolveCatalogArtifact(
+      libraryId: candidate.libraryId,
+      runtimeKey: candidate.runtimeKey,
+      artifacts: libraryArtifacts,
+      libraryReachable: true,
+      artifactFileName: artifactFileName,
+    );
+    return resolution.artifact != null &&
+            resolution.artifact!.fileName == candidate.fileName
+        ? CatalogArtifactInstallState.installed
+        : CatalogArtifactInstallState.occupied;
+  }
+
+  final resolution = resolveCatalogArtifact(
+    libraryId: candidate.libraryId,
+    runtimeKey: candidate.runtimeKey,
+    artifacts: libraryArtifacts,
+    libraryReachable: true,
+    installedFileName: installedFileName,
+  );
+  final selected = resolution.artifact;
+  return selected != null &&
+          selected.libraryId == candidate.libraryId &&
+          selected.fileName == candidate.fileName
+      ? CatalogArtifactInstallState.installed
+      : CatalogArtifactInstallState.occupied;
 }
 
 /// Normalizes the URL parts that are case-insensitive while preserving the
@@ -315,14 +574,23 @@ class ComicSourceLibraryManager {
       final prov = SourceProvenance.fromJson(
         Map<String, dynamic>.from(entry.value as Map),
       );
+      final removedOwnedArtifact =
+          prov.artifactFileName != null &&
+          (prov.originId == id || prov.updateLibraryId == id);
       prov.libraryIds.remove(id);
       if (prov.originId == id) {
         prov.originId = null;
       }
       if (prov.updateLibraryId == id) {
-        prov.updateLibraryId = prov.libraryIds.isNotEmpty
+        prov.updateLibraryId = removedOwnedArtifact
+            ? null
+            : prov.libraryIds.isNotEmpty
             ? prov.libraryIds.first
             : null;
+      } else if (removedOwnedArtifact) {
+        // The artifact was bound to the removed origin. Do not silently attach
+        // it to another same-key library merely because that library offers it.
+        prov.updateLibraryId = null;
       }
       map[entry.key] = prov.toJson();
     }
@@ -381,11 +649,24 @@ class ComicSourceLibraryManager {
 
   /// Records the origin library for a freshly installed [key]. Keeps any
   /// previously discovered library ids.
-  static void recordOrigin(String key, String libraryId) {
-    final prov = provenanceFor(key) ?? SourceProvenance();
-    prov.originId = libraryId;
-    if (!prov.libraryIds.contains(libraryId)) {
-      prov.libraryIds.add(libraryId);
+  static void recordOrigin(
+    String key,
+    String libraryId, {
+    String? artifactFileName,
+  }) {
+    var prov = provenanceFor(key) ?? SourceProvenance();
+    if (artifactFileName != null) {
+      prov = provenanceForCatalogInstall(
+        libraryId: libraryId,
+        artifactFileName: artifactFileName,
+        previous: prov,
+      );
+    } else {
+      prov.originId = libraryId;
+      prov.updateLibraryId = libraryId;
+      if (!prov.libraryIds.contains(libraryId)) {
+        prov.libraryIds.add(libraryId);
+      }
     }
     setProvenance(key, prov);
   }

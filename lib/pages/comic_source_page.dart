@@ -36,17 +36,34 @@ class ComicSourcePage extends StatelessWidget {
     // If the user updates a single source without first running a full update
     // check, the source-list-derived download URL hasn't been cached yet, so
     // the update would fall back to the (possibly migrated/dead) URL in the
-    // installed script. Resolve it lazily here. Failures are non-fatal: the
-    // update still proceeds with the script's own URL.
-    if (ComicSourceManager().updateUrlFor(source.key) == null) {
-      var listUrl = appdata.settings['comicSourceListUrl']?.toString() ?? '';
-      if (listUrl.isNotEmpty) {
+    // installed script. Resolve it lazily here. Catalog-managed sources fail
+    // closed when resolution fails; only true sideloads retain their own URL.
+    final manager = ComicSourceManager();
+    final provenance = manager.provenanceFor(source.key);
+    final catalogManaged =
+        provenance != null &&
+        (provenance.libraryIds.isNotEmpty ||
+            provenance.originId != null ||
+            provenance.updateLibraryId != null ||
+            provenance.artifactFileName != null);
+    if (manager.updateTargetFor(source.key) == null &&
+        manager.updateIssueFor(source.key) == null) {
+      if (catalogManaged || ComicSourceLibraryManager.enabled().isNotEmpty) {
         try {
           await checkComicSourceUpdate();
         } catch (e) {
           Log.error("Comic source update", e.toString());
         }
       }
+    }
+    final issue = manager.updateIssueFor(source.key);
+    if (issue != null) {
+      final message = _catalogResolutionMessage(source.key, issue);
+      if (showLoading) {
+        App.rootContext.showMessage(message: message);
+        return;
+      }
+      throw StateError(message);
     }
     if (showLoading) {
       final task = ComicSourceUpdateTaskManager.instance.start([
@@ -151,16 +168,38 @@ class ComicSourcePage extends StatelessWidget {
   /// the number of sources with a pending update, or -1 if every enabled
   /// library failed to fetch.
   static Future<int> checkComicSourceUpdate() async {
+    final manager = ComicSourceManager();
     if (ComicSource.all().isEmpty) {
+      manager.replaceCatalogUpdateState(
+        availableUpdates: const {},
+        targets: const {},
+        issues: const {},
+      );
       return 0;
     }
     final libraries = ComicSourceLibraryManager.enabled();
     if (libraries.isEmpty) {
+      final issues = <String, CatalogArtifactResolution>{};
+      for (final source in ComicSource.all()) {
+        final provenance = manager.provenanceFor(source.key);
+        if (provenance != null &&
+            (provenance.originId != null ||
+                provenance.updateLibraryId != null ||
+                provenance.artifactFileName != null)) {
+          issues[source.key] = const CatalogArtifactResolution.missing();
+        }
+      }
+      manager.replaceCatalogUpdateState(
+        availableUpdates: const {},
+        targets: const {},
+        issues: issues,
+      );
       return 0;
     }
 
-    // libraryId -> (key -> {version, url}) from that library's catalog.
-    var catalogByLibrary = <String, Map<String, ({String version, String? url})>>{};
+    // Keep every artifact until the installed identity has been resolved. A
+    // runtime key is an installed slot, not a unique catalog-entry identity.
+    var catalogByLibrary = <String, List<CatalogSourceArtifact>>{};
     // key -> ordered list of enabled library ids offering it (this round).
     var offeredBy = <String, List<String>>{};
     // Libraries whose catalog actually fetched+parsed this round. Distinguishes
@@ -189,21 +228,13 @@ class ComicSourcePage extends StatelessWidget {
       }
       succeeded.add(library.id);
       ComicSourceLibraryManager.markChecked(library.id);
-      final entries = <String, ({String version, String? url})>{};
+      final entries = <CatalogSourceArtifact>[];
       for (var source in list) {
         try {
-          var key = source['key']?.toString();
-          var version = source['version']?.toString();
-          if (key == null || version == null) {
-            continue;
-          }
-          var downloadUrl = _resolveSourceDownloadUrl(
-            url: source['url']?.toString(),
-            fileName: source['fileName']?.toString(),
-            listUrl: library.url,
-          );
-          entries[key] = (version: version, url: downloadUrl);
-          final list = offeredBy[key] ??= [];
+          final artifact = _catalogArtifactFromEntry(library, source);
+          if (artifact == null) continue;
+          entries.add(artifact);
+          final list = offeredBy[artifact.runtimeKey] ??= [];
           if (!list.contains(library.id)) {
             list.add(library.id);
           }
@@ -214,12 +245,9 @@ class ComicSourcePage extends StatelessWidget {
       catalogByLibrary[library.id] = entries;
     }
 
-    if (succeeded.isEmpty) {
-      return -1;
-    }
-
-    final manager = ComicSourceManager();
     var pending = <String, String>{};
+    var targets = <String, CatalogSourceArtifact>{};
+    var issues = <String, CatalogArtifactResolution>{};
     var provenanceUpdates = <String, SourceProvenance>{};
     // key -> a DIFFERENT library offering a newer version than the one the
     // update library already offers; only a hint for the explicit switch flow.
@@ -229,28 +257,24 @@ class ComicSourcePage extends StatelessWidget {
       final offered = offeredBy[source.key];
       final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
       final originId = prov.originId;
-      final originLib =
-          originId != null ? ComicSourceLibraryManager.find(originId) : null;
-      // Only an ENABLED origin governs/freezes auto-update. A disabled origin
-      // is treated like a removed one — discovery no longer fetches it, so the
-      // source falls through to an enabled offerer instead of being frozen.
-      final originEnabled = originLib?.enabled ?? false;
+      final previousUpdateLibraryId = prov.updateLibraryId;
+      final previousUpdateLibrary = previousUpdateLibraryId == null
+          ? null
+          : ComicSourceLibraryManager.find(previousUpdateLibraryId);
 
-      // Resolve which library governs this source's auto-update.
-      String? updateLibraryId;
-      if (originId != null &&
-          (catalogByLibrary[originId]?.containsKey(source.key) ?? false)) {
-        // Origin fetched OK and still offers the key — the normal path.
-        updateLibraryId = originId;
-      } else if (originEnabled && !succeeded.contains(originId)) {
-        // Origin enabled but unreachable THIS round: do not silently hand the
-        // source to a foreign maintainer's catalog. Skip auto-update and keep
-        // the existing provenance untouched.
-        updateLibraryId = null;
-      } else if (offered != null && offered.isNotEmpty) {
-        // No usable origin (sideloaded/legacy, origin removed or disabled, or
-        // origin succeeded but dropped the key): fall back to first offerer.
-        updateLibraryId = offered.first;
+      // Origin remains authoritative. Legacy records without an origin retain
+      // their prior update library when it is still enabled; completely unowned
+      // sources use existing library priority. A known orphaned artifact never
+      // silently transfers to another library.
+      String? governingLibraryId;
+      if (originId != null) {
+        governingLibraryId = originId;
+      } else if (previousUpdateLibrary?.enabled == true) {
+        governingLibraryId = previousUpdateLibraryId;
+      } else if (prov.artifactFileName == null &&
+          offered != null &&
+          offered.isNotEmpty) {
+        governingLibraryId = offered.first;
       }
 
       // Merge libraryIds: refresh ids from libraries that fetched this round,
@@ -272,36 +296,70 @@ class ComicSourcePage extends StatelessWidget {
           }
         }
         prov.libraryIds = merged;
-        prov.updateLibraryId = updateLibraryId;
+      }
+
+      CatalogArtifactResolution? resolution;
+      if (governingLibraryId != null) {
+        resolution = resolveCatalogArtifact(
+          libraryId: governingLibraryId,
+          runtimeKey: source.key,
+          artifacts:
+              catalogByLibrary[governingLibraryId] ??
+              const <CatalogSourceArtifact>[],
+          libraryReachable: succeeded.contains(governingLibraryId),
+          artifactFileName: prov.artifactFileName,
+          installedFileName: source.filePath.isEmpty
+              ? null
+              : File(source.filePath).name,
+        );
+      } else if (prov.artifactFileName != null) {
+        // Artifact identity exists but its owning library no longer does.
+        resolution = const CatalogArtifactResolution.missing();
+      }
+
+      if (resolution?.isSelected == true) {
+        final target = resolution!.artifact!;
+        prov.updateLibraryId = target.libraryId;
+        prov.artifactFileName ??= target.fileName;
+        targets[source.key] = target;
+        if (_isNewer(target.version, source.version)) {
+          pending[source.key] = target.version;
+        }
+      } else if (resolution != null &&
+          (originId != null ||
+              previousUpdateLibraryId != null ||
+              prov.artifactFileName != null ||
+              offered?.isNotEmpty == true)) {
+        issues[source.key] = resolution;
+        if (governingLibraryId != null) {
+          prov.updateLibraryId = governingLibraryId;
+        }
+      }
+      if (offered != null || succeeded.isNotEmpty || resolution != null) {
         provenanceUpdates[source.key] = prov;
       }
 
-      if (updateLibraryId != null) {
-        final entry = catalogByLibrary[updateLibraryId]?[source.key];
-        if (entry != null) {
-          if (entry.url != null) {
-            manager.setUpdateUrl(source.key, entry.url!);
-          }
-          if (_isNewer(entry.version, source.version)) {
-            pending[source.key] = entry.version;
-          }
-        }
-      }
-
       // Surface a newer version in another library, beyond what the update
-      // library already offers, only as a switch hint.
-      String baseVersion = source.version;
-      if (updateLibraryId != null) {
-        final govEntry = catalogByLibrary[updateLibraryId]?[source.key];
-        if (govEntry != null) {
-          baseVersion = govEntry.version;
-        }
-      }
+      // library already offers, only as a switch hint. Resolve the same exact
+      // artifact there; a sibling variant is never treated as its update.
+      final selectedTarget = targets[source.key];
+      if (selectedTarget == null) continue;
+      final baseVersion = selectedTarget.version;
       for (final id in prov.libraryIds) {
-        if (id == updateLibraryId) continue;
-        final entry = catalogByLibrary[id]?[source.key];
-        if (entry != null && _isNewer(entry.version, baseVersion)) {
-          newerElsewhere[source.key] = (libraryId: id, version: entry.version);
+        if (id == selectedTarget.libraryId) continue;
+        final other = resolveCatalogArtifact(
+          libraryId: id,
+          runtimeKey: source.key,
+          artifacts: catalogByLibrary[id] ?? const <CatalogSourceArtifact>[],
+          libraryReachable: succeeded.contains(id),
+          artifactFileName: selectedTarget.fileName,
+        );
+        final artifact = other.artifact;
+        if (artifact != null && _isNewer(artifact.version, baseVersion)) {
+          newerElsewhere[source.key] = (
+            libraryId: id,
+            version: artifact.version,
+          );
           break;
         }
       }
@@ -309,10 +367,12 @@ class ComicSourcePage extends StatelessWidget {
 
     ComicSourceLibraryManager.setProvenanceBatch(provenanceUpdates);
     manager.setNewerElsewhere(newerElsewhere);
-    // Full replace, not merge: a source whose origin library was removed or
-    // disabled must drop out of the badge set.
-    manager.replaceAvailableUpdates(pending);
-    return pending.length;
+    manager.replaceCatalogUpdateState(
+      availableUpdates: pending,
+      targets: targets,
+      issues: issues,
+    );
+    return succeeded.isEmpty ? -1 : pending.length;
   }
 
   /// True if [candidate] is a strictly newer version than [current].
@@ -750,8 +810,8 @@ class _ComicSourceList extends StatefulWidget {
   /// The library whose catalog (`index.json`) this view browses.
   final ComicSourceLibrary library;
 
-  /// Installs a source from [url], stamping it with the library's id as origin.
-  final Future<void> Function(String url, String originLibraryId) onAdd;
+  /// Installs one exact catalog artifact and stamps its full identity.
+  final Future<void> Function(CatalogSourceArtifact artifact) onAdd;
 
   @override
   State<_ComicSourceList> createState() => _ComicSourceListState();
@@ -817,8 +877,6 @@ class _ComicSourceListState extends State<_ComicSourceList> {
   }
 
   Widget buildBody() {
-    var currentKey = ComicSource.all().map((e) => e.key).toList();
-
     if (json == null) {
       return Center(
         child: CircularProgressIndicator(
@@ -854,13 +912,35 @@ class _ComicSourceListState extends State<_ComicSourceList> {
       );
     }
 
+    final artifacts = json!
+        .map((entry) => _catalogArtifactFromEntry(library, entry))
+        .whereType<CatalogSourceArtifact>()
+        .toList();
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       itemCount: json!.length,
       itemBuilder: (context, index) {
         var entry = json![index];
         var key = entry["key"]?.toString();
-        var installed = key != null && currentKey.contains(key);
+        final artifact = _catalogArtifactFromEntry(library, entry);
+        final installedSource = key == null ? null : ComicSource.find(key);
+        final installState = artifact == null
+            ? installedSource == null
+                  ? CatalogArtifactInstallState.available
+                  : CatalogArtifactInstallState.occupied
+            : catalogArtifactInstallState(
+                candidate: artifact,
+                libraryArtifacts: artifacts,
+                runtimeKeyInstalled: installedSource != null,
+                provenance: key == null
+                    ? null
+                    : ComicSourceManager().provenanceFor(key),
+                installedFileName:
+                    installedSource == null || installedSource.filePath.isEmpty
+                    ? null
+                    : File(installedSource.filePath).name,
+              );
         var version = entry["version"]?.toString();
         var description = entry["description"]?.toString();
 
@@ -924,7 +1004,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                installed
+                installState == CatalogArtifactInstallState.installed
                     ? Tooltip(
                         message: "Installed".tl,
                         child: Icon(
@@ -933,17 +1013,21 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                           color: context.colorScheme.primary,
                         ),
                       ).paddingRight(8)
+                    : installState == CatalogArtifactInstallState.occupied
+                    ? Tooltip(
+                        message:
+                            "Another variant with this key is installed".tl,
+                        child: Icon(
+                          Icons.lock_outline,
+                          size: 22,
+                          color: context.colorScheme.outline,
+                        ),
+                      ).paddingRight(8)
                     : Button.filled(
                         child: Text("Add".tl),
                         onPressed: () async {
-                          var fileName = entry["fileName"];
-                          var url = entry["url"];
-                          var resolved = _resolveSourceDownloadUrl(
-                            url: url?.toString(),
-                            fileName: fileName?.toString(),
-                            listUrl: library.url,
-                          );
-                          if (resolved == null) {
+                          if (artifact == null ||
+                              artifact.downloadUrl.isEmpty) {
                             context.showMessage(
                               message:
                                   "Cannot resolve the source download url. "
@@ -952,7 +1036,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                             );
                             return;
                           }
-                          await widget.onAdd(resolved, library.id);
+                          await widget.onAdd(artifact);
                           if (!mounted) return;
                           setState(() {});
                         },
@@ -994,6 +1078,56 @@ String? _resolveSourceDownloadUrl({
   return resolved.isURL ? resolved : null;
 }
 
+CatalogSourceArtifact? _catalogArtifactFromEntry(
+  ComicSourceLibrary library,
+  dynamic entry,
+) {
+  if (entry is! Map) return null;
+  final runtimeKey = entry['key']?.toString();
+  final fileName = entry['fileName']?.toString();
+  final version = entry['version']?.toString();
+  if (runtimeKey == null ||
+      runtimeKey.isEmpty ||
+      fileName == null ||
+      fileName.isEmpty ||
+      version == null ||
+      version.isEmpty) {
+    return null;
+  }
+  final downloadUrl = _resolveSourceDownloadUrl(
+    url: entry['url']?.toString(),
+    fileName: fileName,
+    listUrl: library.url,
+  );
+  return CatalogSourceArtifact(
+    libraryId: library.id,
+    runtimeKey: runtimeKey,
+    fileName: fileName,
+    version: version,
+    // Keep malformed sibling entries in the candidate list so they cannot make
+    // a duplicate runtime key appear uniquely resolvable.
+    downloadUrl: downloadUrl ?? '',
+  );
+}
+
+String _catalogResolutionMessage(
+  String runtimeKey,
+  CatalogArtifactResolution resolution,
+) {
+  return switch (resolution.status) {
+    CatalogArtifactResolutionStatus.ambiguous =>
+      "Multiple catalog artifacts use runtime key '@k'. Reinstall or explicitly select a variant."
+          .tlParams({'k': runtimeKey}),
+    CatalogArtifactResolutionStatus.missing =>
+      "The installed catalog artifact for '@k' is missing or was renamed. Reinstall or choose another library."
+          .tlParams({'k': runtimeKey}),
+    CatalogArtifactResolutionStatus.unreachable =>
+      "The source library for '@k' is unreachable. Try again before updating."
+          .tlParams({'k': runtimeKey}),
+    CatalogArtifactResolutionStatus.selected => '',
+  };
+}
+
 /// Removes a source's locally persisted state so a (re)install starts clean.
 /// Deletes the `<key>.data` file (login flag, saved credentials, webview
 /// localStorage) and the source's domain cookies (unless another installed
@@ -1031,17 +1165,12 @@ void purgeSourceLocalData(ComicSource source, {required bool deleteScript}) {
   }
 }
 
-/// Downloads a source script from [url], installs it, and stamps its origin
-/// library. Shared by the library catalog browser and the libraries page so the
-/// install + provenance flow lives in one place. Shows its own loading dialog.
-/// Returns true on success.
-Future<bool> _installSourceFromUrl(String url, String originLibraryId) async {
+/// Downloads, verifies, and installs one exact catalog artifact.
+Future<bool> _installSourceFromArtifact(CatalogSourceArtifact artifact) async {
+  final url = artifact.downloadUrl;
   if (url.isEmpty) {
     return false;
   }
-  var splits = url.split("/");
-  splits.removeWhere((element) => element == "");
-  var fileName = splits.isEmpty ? "source.js" : splits.last;
   bool cancel = false;
   var controller = showLoadingDialog(
     App.rootContext,
@@ -1060,9 +1189,26 @@ Future<bool> _installSourceFromUrl(String url, String originLibraryId) async {
     controller.close();
     var comicSource = await ComicSourceParser().createAndParse(
       res.data!,
-      fileName,
+      artifact.fileName,
     );
-    final added = ComicSourceManager().add(comicSource);
+    final manager = ComicSourceManager();
+    try {
+      validateCatalogInstallRuntimeKey(
+        catalogRuntimeKey: artifact.runtimeKey,
+        parsedRuntimeKey: comicSource.key,
+      );
+    } catch (_) {
+      try {
+        final file = File(comicSource.filePath);
+        if (file.existsSync()) file.deleteSync();
+      } finally {
+        // Parsing registers the temporary source in QuickJS. Reload after the
+        // file is gone so a mismatched catalog artifact leaves no runtime trace.
+        await manager.reload();
+      }
+      rethrow;
+    }
+    final added = manager.add(comicSource);
     if (!added) {
       // Duplicate key: drop the shadow file and report instead of half-adding.
       try {
@@ -1078,7 +1224,11 @@ Future<bool> _installSourceFromUrl(String url, String originLibraryId) async {
       );
       return false;
     }
-    ComicSourceLibraryManager.recordOrigin(comicSource.key, originLibraryId);
+    ComicSourceLibraryManager.recordOrigin(
+      comicSource.key,
+      artifact.libraryId,
+      artifactFileName: artifact.fileName,
+    );
     _addAllPagesWithComicSource(comicSource);
     appdata.saveData();
     App.forceRebuild();
@@ -1366,8 +1516,8 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
   void _browseLibrary(ComicSourceLibrary library) {
     showPopUpWidget(
       App.rootContext,
-      _ComicSourceList(library, (url, originLibraryId) async {
-        await _installSourceFromUrl(url, originLibraryId);
+      _ComicSourceList(library, (artifact) async {
+        await _installSourceFromArtifact(artifact);
       }),
     );
   }
@@ -1376,8 +1526,14 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
     var count = await ComicSourcePage.checkComicSourceUpdate();
     if (!mounted) return;
     _reload();
+    final issues = ComicSourceManager().updateIssues;
     if (count == -1) {
       context.showMessage(message: "Network error".tl);
+    } else if (issues.isNotEmpty) {
+      final issue = issues.entries.first;
+      context.showMessage(
+        message: _catalogResolutionMessage(issue.key, issue.value),
+      );
     } else if (count == 0) {
       context.showMessage(message: "No updates".tl);
     } else {
@@ -1780,11 +1936,25 @@ class _CheckUpdatesButtonState extends State<_CheckUpdatesButton> {
     });
     var count = await ComicSourcePage.checkComicSourceUpdate();
     if (!mounted) return;
+    final issues = ComicSourceManager().updateIssues;
     if (count == -1) {
       context.showMessage(message: "Network error".tl);
     } else if (count == 0) {
-      context.showMessage(message: "No updates".tl);
+      if (issues.isNotEmpty) {
+        final issue = issues.entries.first;
+        context.showMessage(
+          message: _catalogResolutionMessage(issue.key, issue.value),
+        );
+      } else {
+        context.showMessage(message: "No updates".tl);
+      }
     } else {
+      if (issues.isNotEmpty) {
+        final issue = issues.entries.first;
+        context.showMessage(
+          message: _catalogResolutionMessage(issue.key, issue.value),
+        );
+      }
       showUpdateDialog();
     }
     setState(() {
@@ -2077,6 +2247,10 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
         ComicSourcePage._isNewer(newVersion, source.version);
     var provenanceText = _provenanceText();
     var newerElsewhere = manager.newerElsewhereFor(source.key);
+    final updateIssue = manager.updateIssueFor(source.key);
+    final issueHint = updateIssue == null
+        ? null
+        : _catalogResolutionMessage(source.key, updateIssue);
     String? newerHint;
     if (newerElsewhere != null) {
       final lib = ComicSourceLibraryManager.find(newerElsewhere.libraryId);
@@ -2175,6 +2349,12 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                               icon: Icons.upgrade,
                               text: newerHint,
                               color: context.colorScheme.tertiary,
+                            ),
+                          if (issueHint != null)
+                            _infoChip(
+                              icon: Icons.warning_amber_outlined,
+                              text: issueHint,
+                              color: context.colorScheme.error,
                             ),
                         ],
                       ),
@@ -2325,7 +2505,8 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
       barrierDismissible: true,
       allowCancel: true,
     );
-    final resolved = <String, ({String version, String? url})>{};
+    final currentProvenance = ComicSourceManager().provenanceFor(source.key);
+    final resolved = <String, CatalogArtifactResolution>{};
     await Future.wait(
       libraries.map((lib) async {
         try {
@@ -2336,23 +2517,24 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
               )
               .timeout(const Duration(seconds: 20));
           var list = jsonDecode(res.data!) as List;
-          for (var entry in list) {
-            if (entry['key']?.toString() == source.key) {
-              final v = entry['version']?.toString();
-              if (v == null) break;
-              resolved[lib.id] = (
-                version: v,
-                url: _resolveSourceDownloadUrl(
-                  url: entry['url']?.toString(),
-                  fileName: entry['fileName']?.toString(),
-                  listUrl: lib.url,
-                ),
-              );
-              break;
-            }
-          }
+          final artifacts = list
+              .map((entry) => _catalogArtifactFromEntry(lib, entry))
+              .whereType<CatalogSourceArtifact>()
+              .toList();
+          final knownFileName = currentProvenance?.artifactFileName;
+          resolved[lib.id] = resolveAlternateLibraryArtifact(
+            libraryId: lib.id,
+            runtimeKey: source.key,
+            artifacts: artifacts,
+            libraryReachable: true,
+            currentArtifactFileName: knownFileName,
+            installedFileName: source.filePath.isEmpty
+                ? null
+                : File(source.filePath).name,
+          );
         } catch (e) {
           Log.error("Switch source library", "${lib.name}: $e");
+          resolved[lib.id] = const CatalogArtifactResolution.unreachable();
         }
       }),
     );
@@ -2371,11 +2553,12 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
               for (final lib in libraries)
                 Builder(
                   builder: (context) {
-                    final entry = resolved[lib.id];
+                    final resolution = resolved[lib.id];
+                    final entry = resolution?.artifact;
                     final host = Uri.tryParse(lib.url)?.host ?? lib.url;
                     final subtitle = entry != null
                         ? "$host · v${entry.version}"
-                        : "$host · ${"Unavailable".tl}";
+                        : "$host · ${resolution?.status.name ?? "Unavailable".tl}";
                     return ListTile(
                       title: Text(lib.name),
                       subtitle: Text(subtitle),
@@ -2411,10 +2594,8 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
     );
     if (chosen == null) return;
     final library = chosen!;
-    final entry = resolved[library.id];
-    final version = entry?.version;
-    final downloadUrl = entry?.url;
-    if (version == null || downloadUrl == null) {
+    final target = resolved[library.id]?.artifact;
+    if (target == null) {
       App.rootContext.showMessage(
         message: "This library no longer offers this source".tl,
       );
@@ -2430,7 +2611,7 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
               .tlParams({
                 "n": source.name,
                 "lib": library.name,
-                "v": version,
+                "v": target.version,
               }),
       onConfirm: () {
         // Defer the destructive purge: register it to run inside the update
@@ -2440,14 +2621,11 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
         // Write through winner state so the standard update flow targets the
         // chosen library's variant, and re-stamp the origin.
         final manager = ComicSourceManager();
-        manager.setUpdateUrl(source.key, downloadUrl);
-        manager.replaceAvailableUpdates({
-          ...manager.availableUpdates,
-          source.key: version,
-        });
+        manager.setUpdateTarget(target);
         final prov = manager.provenanceFor(source.key) ?? SourceProvenance();
         prov.originId = library.id;
         prov.updateLibraryId = library.id;
+        prov.artifactFileName = target.fileName;
         if (!prov.libraryIds.contains(library.id)) {
           prov.libraryIds.add(library.id);
         }

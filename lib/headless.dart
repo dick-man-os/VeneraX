@@ -16,6 +16,107 @@ void cliPrint(Map<String, dynamic> data) {
   print('[CLI PRINT] ${jsonEncode(data)}');
 }
 
+/// Shared implementation of `updatescript all`, with injectable edges for a
+/// deterministic headless safety test.
+Future<void> runHeadlessComicSourceUpdates({
+  Future<int> Function()? checkForUpdates,
+  Future<void> Function(ComicSource source)? updateSource,
+  void Function(Map<String, dynamic> data)? output,
+}) async {
+  final check = checkForUpdates ?? ComicSourcePage.checkComicSourceUpdate;
+  final update =
+      updateSource ?? (source) => ComicSourcePage.update(source, false);
+  final printResult = output ?? cliPrint;
+
+  printResult({
+    'status': 'running',
+    'message': 'Checking for comic source script updates...',
+  });
+  await check();
+  final manager = ComicSourceManager();
+  final updates = manager.availableUpdates;
+  final issues = manager.updateIssues;
+  final issueData = issues.entries
+      .map(
+        (entry) => {
+          'sourceKey': entry.key,
+          'status': entry.value.status.name,
+          'message':
+              'Catalog artifact ${entry.value.status.name}; reinstall or explicitly select a source variant.',
+        },
+      )
+      .toList();
+
+  if (updates.isEmpty) {
+    if (issueData.isEmpty) {
+      printResult({'status': 'success', 'message': 'No updates found.'});
+    } else {
+      printResult({
+        'status': 'error',
+        'message':
+            'Source updates need action; no affected script was updated.',
+        'data': {'skipped': issueData},
+      });
+    }
+    return;
+  }
+
+  var current = 0;
+  var errors = 0;
+  var updated = 0;
+  printResult({
+    'status': 'running',
+    'message': 'Updating all comic source scripts...',
+    'data': {
+      'total': updates.length,
+      'current': 0,
+      'updated': 0,
+      'errors': 0,
+      'skipped': issueData.length,
+    },
+  });
+  for (final key in updates.keys) {
+    final source = ComicSource.find(key);
+    if (source == null) continue;
+    current++;
+    final data = {
+      'current': current,
+      'total': updates.length,
+      'source': {
+        'key': source.key,
+        'name': source.name,
+        'version': source.version,
+        'url': source.url,
+      },
+    };
+    try {
+      await update(source);
+      updated++;
+      printResult({'status': 'running', 'message': 'Progress', 'data': data});
+    } catch (e) {
+      errors++;
+      printResult({
+        'status': 'running',
+        'message': 'ProgressError',
+        'data': {...data, 'error': e.toString()},
+      });
+    }
+  }
+  final hasFailure = errors > 0 || issueData.isNotEmpty;
+  printResult({
+    'status': hasFailure ? 'error' : 'success',
+    'message': hasFailure
+        ? 'Script updates completed with errors or skipped sources.'
+        : 'All scripts updated.',
+    'data': {
+      'total': updates.length,
+      'updated': updated,
+      'errors': errors,
+      'skipped': issueData,
+    },
+  });
+}
+
 Future<void> runHeadlessMode(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   if (args.contains('--ignore-disheadless-log')) {
@@ -80,71 +181,7 @@ Future<void> runHeadlessMode(List<String> args) async {
       break;
     case 'updatescript':
       if (subCommand == 'all') {
-        cliPrint({'status': 'running', 'message': 'Checking for comic source script updates...'});
-        await ComicSourcePage.checkComicSourceUpdate();
-        var updates = ComicSourceManager().availableUpdates;
-        if (updates.isEmpty) {
-          cliPrint({'status': 'success', 'message': 'No updates found.'});
-        } else {
-          var total = updates.length;
-          var current = 0;
-          var errors = 0;
-          var updated = 0;
-          cliPrint({
-            'status': 'running',
-            'message': 'Updating all comic source scripts...',
-            'data': {
-              'total': total,
-              'current': 0,
-              'updated': 0,
-              'errors': 0,
-            }
-          });
-          for (var key in updates.keys) {
-            var source = ComicSource.find(key);
-            if (source != null) {
-              current++;
-              var data = {
-                'current': current,
-                'total': total,
-                'source': {
-                  'key': source.key,
-                  'name': source.name,
-                  'version': source.version,
-                  'url': source.url,
-                }
-              };
-              try {
-                await ComicSourcePage.update(source, false);
-                updated++;
-                cliPrint({
-                  'status': 'running',
-                  'message': 'Progress',
-                  'data': data,
-                });
-              } catch (e) {
-                errors++;
-                cliPrint({
-                  'status': 'running',
-                  'message': 'ProgressError',
-                  'data': {
-                    ...data,
-                    'error': e.toString(),
-                  },
-                });
-              }
-            }
-          }
-          cliPrint({
-            'status': 'success',
-            'message': 'All scripts updated.',
-            'data': {
-              'total': total,
-              'updated': updated,
-              'errors': errors,
-            }
-          });
-        }
+        await runHeadlessComicSourceUpdates();
       } else {
         cliPrint({'status': 'error', 'message': 'Invalid updatescript command. Use "all".'});
         exit(1);

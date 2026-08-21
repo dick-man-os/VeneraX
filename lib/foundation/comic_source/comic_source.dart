@@ -377,7 +377,8 @@ class ComicSourceManager with ChangeNotifier, Init {
     // Drop cached update state so a reinstalled source with the same key does
     // not inherit a stale version badge, download URL, or switch hint.
     _availableUpdates.remove(key);
-    _updateUrls.remove(key);
+    _updateTargets.remove(key);
+    _updateIssues.remove(key);
     _newerElsewhere.remove(key);
     notifyListeners();
   }
@@ -387,19 +388,29 @@ class ComicSourceManager with ChangeNotifier, Init {
   /// Key is the source key, value is the version.
   final _availableUpdates = <String, String>{};
 
-  /// Key is the source key, value is the download URL resolved from the source
-  /// list during the last update check. Single-source updates prefer this over
-  /// the URL baked into the installed script, so a migrated source list points
-  /// downloads at the new address instead of the dead old one.
-  final _updateUrls = <String, String>{};
+  /// Validated catalog target for each installed runtime-key slot. Replaced as
+  /// a whole after every completed check so an old URL cannot survive a later
+  /// ambiguous, missing, or unreachable resolution.
+  final _updateTargets = <String, CatalogSourceArtifact>{};
 
-  /// Replaces the entire pending-update set. Used by the multi-library check so
-  /// that a source whose update is no longer offered (origin library removed or
-  /// disabled, or it was just updated) does not linger as a stale badge.
-  void replaceAvailableUpdates(Map<String, String> updates) {
+  /// Explicit unresolved result for catalog-managed or catalog-claimed sources.
+  final _updateIssues = <String, CatalogArtifactResolution>{};
+
+  /// Atomically publishes one complete catalog-check result.
+  void replaceCatalogUpdateState({
+    required Map<String, String> availableUpdates,
+    required Map<String, CatalogSourceArtifact> targets,
+    required Map<String, CatalogArtifactResolution> issues,
+  }) {
     _availableUpdates
       ..clear()
-      ..addAll(updates);
+      ..addAll(availableUpdates);
+    _updateTargets
+      ..clear()
+      ..addAll(targets);
+    _updateIssues
+      ..clear()
+      ..addAll(issues);
     notifyListeners();
   }
 
@@ -422,18 +433,27 @@ class ComicSourceManager with ChangeNotifier, Init {
 
   Map<String, String> get availableUpdates => Map.from(_availableUpdates);
 
-  /// Records the download URL for [key] resolved from the source list.
-  void setUpdateUrl(String key, String url) {
-    _updateUrls[key] = url;
+  Map<String, CatalogArtifactResolution> get updateIssues =>
+      Map.from(_updateIssues);
+
+  CatalogArtifactResolution? updateIssueFor(String key) => _updateIssues[key];
+
+  /// Records a target selected by an explicit, user-confirmed library switch.
+  void setUpdateTarget(CatalogSourceArtifact target) {
+    _updateTargets[target.runtimeKey] = target;
+    _updateIssues.remove(target.runtimeKey);
+    _availableUpdates[target.runtimeKey] = target.version;
+    notifyListeners();
   }
 
-  /// Returns the source-list-derived download URL for [key], if known.
-  String? updateUrlFor(String key) => _updateUrls[key];
+  CatalogSourceArtifact? updateTargetFor(String key) => _updateTargets[key];
 
   void clearAvailableUpdate(String key) {
     final hadUpdate = _availableUpdates.remove(key) != null;
-    _updateUrls.remove(key);
-    if (hadUpdate) {
+    final hadTarget = _updateTargets.remove(key) != null;
+    final hadIssue = _updateIssues.remove(key) != null;
+    final hadState = hadUpdate || hadTarget || hadIssue;
+    if (hadState) {
       notifyListeners();
     }
   }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
@@ -221,13 +222,59 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
   static final pendingDataPurge = <String>{};
   static void Function(ComicSource source)? onPurgeLocalData;
 
+  @visibleForTesting
+  static void validateCatalogTargetForExecution({
+    required String installedRuntimeKey,
+    required SourceProvenance provenance,
+    required CatalogSourceArtifact? target,
+  }) {
+    final validationError = validateCatalogUpdateTarget(
+      installedRuntimeKey: installedRuntimeKey,
+      provenance: provenance,
+      target: target,
+    );
+    if (validationError != null) {
+      throw StateError(validationError);
+    }
+  }
+
+  @visibleForTesting
+  static void validateDownloadedRuntimeKey({
+    required String installedRuntimeKey,
+    required String downloadedRuntimeKey,
+  }) {
+    if (downloadedRuntimeKey != installedRuntimeKey) {
+      throw StateError(
+        "Downloaded source key '$downloadedRuntimeKey' does not match installed key '$installedRuntimeKey'",
+      );
+    }
+  }
+
   static Future<String> updateSourceFile(ComicSource source) async {
-    // Prefer the download URL resolved from the source list during the last
-    // update check; fall back to the URL baked into the installed script.
-    // This keeps single-source updates pointed at the current address after a
-    // source list migration, instead of the dead old one in the old script.
-    final downloadUrl =
-        ComicSourceManager().updateUrlFor(source.key) ?? source.url;
+    final manager = ComicSourceManager();
+    final provenance = manager.provenanceFor(source.key);
+    final target = manager.updateTargetFor(source.key);
+    final catalogManaged =
+        target != null ||
+        (provenance != null &&
+            (provenance.libraryIds.isNotEmpty ||
+                provenance.originId != null ||
+                provenance.updateLibraryId != null ||
+                provenance.artifactFileName != null));
+    if (catalogManaged) {
+      if (provenance == null) {
+        throw StateError('Catalog update target has no source provenance');
+      }
+      validateCatalogTargetForExecution(
+        installedRuntimeKey: source.key,
+        provenance: provenance,
+        target: target,
+      );
+    }
+    // Truly non-catalog sideloads retain their explicit self-update URL. A
+    // catalog-managed source never reaches this fallback without a validated
+    // target, including after ambiguous/missing/unreachable resolution.
+    final downloadUrl = target?.downloadUrl ?? source.url;
     if (!downloadUrl.isURL) {
       throw Exception('Invalid url config');
     }
@@ -244,21 +291,26 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
       if (data == null || data.isEmpty) {
         throw Exception('Empty response');
       }
-      // Download confirmed: now safe to purge local data for a library switch.
+      manager.remove(source.key);
+      removed = true;
+      final parsed = await ComicSourceParser().parse(data, source.filePath);
+      validateDownloadedRuntimeKey(
+        installedRuntimeKey: source.key,
+        downloadedRuntimeKey: parsed.key,
+      );
+      // The replacement has downloaded and parsed as the same runtime slot; an
+      // explicit library switch may now safely clear the previous local state.
       if (pendingDataPurge.remove(source.key)) {
         onPurgeLocalData?.call(source);
       }
-      ComicSourceManager().remove(source.key);
-      removed = true;
-      final parsed = await ComicSourceParser().parse(data, source.filePath);
       // Atomic replace: a kill mid-write would leave a truncated script that
       // fails to parse at next startup, silently losing the source.
       await writeStringAtomic(source.filePath, data);
-      ComicSourceManager().clearAvailableUpdate(source.key);
+      manager.clearAvailableUpdate(source.key);
       return parsed.version;
     } finally {
       if (removed) {
-        await ComicSourceManager().reload();
+        await manager.reload();
       }
     }
   }
