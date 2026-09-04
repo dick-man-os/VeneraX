@@ -52,8 +52,12 @@ typedef GetImageLoadingConfigFunc =
       String comicId,
       String epId,
     )?;
+
+/// Mirrors [GetImageLoadingConfigFunc] so covers and page images offer the same
+/// post-processing surface: the config may be built asynchronously, and its
+/// `onResponse` may return a Future.
 typedef GetThumbnailLoadingConfigFunc =
-    Map<String, dynamic> Function(String imageKey)?;
+    Future<Map<String, dynamic>> Function(String imageKey, String? comicId)?;
 
 typedef ComicThumbnailLoader =
     Future<Res<List<String>>> Function(String comicId, String? next);

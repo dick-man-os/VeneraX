@@ -114,14 +114,11 @@ class ComicChapterProgressInfo {
 
 class ComicStateRepository {
   const ComicStateRepository({
-    DomainDatabase? domain,
-    LocalManager? localManager,
-    HistoryManager? historyManager,
-    LocalFavoritesManager? favoritesManager,
-  }) : _domain = domain,
-       _localManager = localManager,
-       _historyManager = historyManager,
-       _favoritesManager = favoritesManager;
+    this._domain,
+    this._localManager,
+    this._historyManager,
+    this._favoritesManager,
+  });
 
   final DomainDatabase? _domain;
   final LocalManager? _localManager;

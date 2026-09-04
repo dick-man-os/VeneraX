@@ -15,6 +15,60 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "2.2.12",
+          "buildVersion": "242",
+          "date": "2026-08-29",
+          "localizedDescription": "## What's Changed\n\n### Fixed\n- Fix proxy and certificate settings not applying to downloads\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.11...v2.2.12",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.12/VeneraX-ios-2.2.12%2B242.ipa",
+          "size": 35251387,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "2.2.11",
+          "buildVersion": "241",
+          "date": "2026-08-28",
+          "localizedDescription": "## What's Changed\n\n### Fixed\n- Chewed through a few bugs\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.10...v2.2.11",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.11/VeneraX-ios-2.2.11%2B241.ipa",
+          "size": 35251962,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "2.2.10",
+          "buildVersion": "240",
+          "date": "2026-08-27",
+          "localizedDescription": "## What's Changed\n\n### Added\n- Comic details now lets you hide duplicate chapters for each comic, keeping chapter, download, and pre-translation lists consistent\n- Desktop now offers an option to enter fullscreen automatically when reading starts\n- Added an option to remove a comic from Read Later automatically when reading starts\n\n### Changed\n- Continuous reading now lets you adjust image width from 40% to 150% of screen height\n- Reorganized Settings and moved Appearance options into App\n- `comic.onThumbnailLoad` now matches `comic.onImageLoad`: configuration functions may be async, Promise results from `onResponse` are awaited, response types are validated, and `comicId` is passed as the second argument\n\n### Fixed\n- Fixed mouse wheel and touchpad scrolling not working over blank side margins when image width was limited in continuous reading\n- Fixed per-comic image width limits not being applied correctly in continuous reading\n- Fixed Settings sometimes crashing when a saved setting value was empty\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.9...v2.2.10",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.10/VeneraX-ios-2.2.10%2B240.ipa",
+          "size": 35250462,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "2.2.9",
+          "buildVersion": "239",
+          "date": "2026-08-25",
+          "localizedDescription": "## What's Changed\n\n### Added\n- Reading Statistics now supports swiping a comic left to delete its record\n\n### Changed\n- The Reading Statistics sort choice is now saved with your synced data\n\n### Fixed\n- Fixed some comic covers not showing\n- Fixed the app crashing when a network request failed\n- Fixed pressing back while editing the home layout leaving the app instead of exiting edit mode\n- Fixed Reading Statistics still listing blocked comics\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.8...v2.2.9",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.9/VeneraX-ios-2.2.9%2B239.ipa",
+          "size": 35242955,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "2.2.8",
+          "buildVersion": "238",
+          "date": "2026-08-20",
+          "localizedDescription": "## What's Changed\n\n### Added\n- New Translation Library page that lists comics by translated / not translated\n- Opening a comic from the library shows its chapters split into translated and pending\n- Clear every translation result of a comic in one action from the library\n- Translation Library can be added as a home page section for quick access\n- Reading Statistics can now be sorted by last read, reading time, or name\n- Import help is now an in-app document instead of an external web page\n\n### Changed\n- Home, the main pane and Reading Statistics now fill a wide window instead of keeping a fixed width with empty margins\n- The bottom navigation bar now shows icons only\n- Refined the look of the update notice on the home page\n- The disclaimer now covers derivative work and redistribution\n\n### Fixed\n- Fixed the import help title showing untranslated text in some languages\n\n### Removed\n- Removed a help entry that pointed to content no longer available\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.7...v2.2.8",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.8/VeneraX-ios-2.2.8%2B238.ipa",
+          "size": 35245357,
+          "minOSVersion": "14.0"
+        },
+        {
+          "version": "2.2.7",
+          "buildVersion": "237",
+          "date": "2026-08-18",
+          "localizedDescription": "## What's Changed\n\n### Added\n- Reading statistics can now be opened directly from the Home page\n\n### Changed\n- Refined the Home, Explore, Categories, Follow Updates, and Favorites layouts for more consistent alignment, spacing, and visual hierarchy\n- Main navigation and menus now use clearer labels and larger, more consistent tap targets\n\n### Fixed\n- Fixed WebDAV backups failing with HTTP 404 on some services such as Nutstore\n- Fixed backups sometimes omitting the latest data-sync settings\n- Fixed duplicate tags appearing for local comics in list view\n- Fixed Follow Updates sometimes retaining an outdated layout after initial setup until the app state changed\n- Fixed additional source libraries sometimes being treated as duplicates and refusing to add\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.6...v2.2.7",
+          "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.7/VeneraX-ios-2.2.7%2B237.ipa",
+          "size": 35207701,
+          "minOSVersion": "14.0"
+        },
+        {
           "version": "2.2.6",
           "buildVersion": "236",
           "date": "2026-08-18",
@@ -213,11 +267,11 @@
           "minOSVersion": "14.0"
         }
       ],
-      "version": "2.2.6",
-      "versionDate": "2026-08-18",
-      "versionDescription": "## What's Changed\n\n### Added\n- Added a reading statistics page showing today's reading time, the last seven days, total reading time, a seven-day trend, and comics read in the last 30 days\n- Reading time is now tracked automatically while reading\n- Added an option for WebDAV libraries to detect linked comic folders, including folders some servers report as files\n\n### Changed\n- Comic details can now be refreshed manually, including local comics whose metadata, cover, or chapters changed on disk\n- WebDAV migration now checks local chapters before upload and shows detailed failure information, including the affected comic and chapter\n\n### Fixed\n- Fixed opening a favorite chapter at a specific index incorrectly applying the saved chapter-group offset\n- Fixed notification links opening content outside the safe area on some devices\n- Fixed reader menu and system UI changes occasionally destabilizing the reading viewport or page loading\n- Fixed images and chapters occasionally getting stuck loading indefinitely\n- Fixed rapid page turns in continuous reading jumping to incorrect positions or becoming stuck\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.5...v2.2.6",
-      "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.6/VeneraX-ios-2.2.6%2B236.ipa",
-      "size": 35202180
+      "version": "2.2.12",
+      "versionDate": "2026-08-29",
+      "versionDescription": "## What's Changed\n\n### Fixed\n- Fix proxy and certificate settings not applying to downloads\n\n**Full Changelog**: https://github.com/Kyosee/VeneraX/compare/v2.2.11...v2.2.12",
+      "downloadURL": "https://github.com/Kyosee/VeneraX/releases/download/v2.2.12/VeneraX-ios-2.2.12%2B242.ipa",
+      "size": 35251387
     }
   ],
   "news": []

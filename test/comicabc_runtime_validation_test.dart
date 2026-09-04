@@ -19,15 +19,15 @@ void main() {
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('plugins.flutter.io/path_provider'),
-      (MethodCall methodCall) async => tempDir.path,
-    );
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (MethodCall methodCall) async => tempDir.path,
+        );
 
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('plugins.flutter.io/path_provider_windows'),
-      (MethodCall methodCall) async => tempDir.path,
-    );
+          const MethodChannel('plugins.flutter.io/path_provider_windows'),
+          (MethodCall methodCall) async => tempDir.path,
+        );
 
     PackageInfo.setMockInitialValues(
       appName: 'VeneraX',
@@ -57,97 +57,138 @@ void main() {
     late Comic dynamicComic;
     String realEpId = '';
 
-    test('1. Parses and instantiates comicabc.js via ComicSourceParser', () async {
-      final jsPath = '../venera-configs/comicabc.js';
-      final jsFile = File(jsPath);
-      expect(jsFile.existsSync(), isTrue, reason: 'comicabc.js must exist at $jsPath');
-      final jsContent = await jsFile.readAsString();
+    test(
+      '1. Parses and instantiates comicabc.js via ComicSourceParser',
+      () async {
+        final jsPath = '../venera-configs/comicabc.js';
+        final jsFile = File(jsPath);
+        expect(
+          jsFile.existsSync(),
+          isTrue,
+          reason: 'comicabc.js must exist at $jsPath',
+        );
+        final jsContent = await jsFile.readAsString();
 
-      source = await ComicSourceParser().parse(jsContent, jsFile.absolute.path);
+        source = await ComicSourceParser().parse(
+          jsContent,
+          jsFile.absolute.path,
+        );
 
-      expect(source.key, equals('zh_Hant_comicabc'));
-      expect(source.name, equals('Comicabc'));
-      expect(source.version, equals('1.0.2'));
-      expect(source.searchPageData, isNotNull);
-      expect(source.loadComicInfo, isNotNull);
-      expect(source.loadComicPages, isNotNull);
-      expect(source.getThumbnailLoadingConfig, isNotNull);
-      expect(source.getImageLoadingConfig, isNotNull);
-    });
+        expect(source.key, equals('zh_Hant_comicabc'));
+        expect(source.name, equals('Comicabc'));
+        expect(source.version, equals('1.0.3'));
+        expect(source.searchPageData, isNotNull);
+        expect(source.loadComicInfo, isNotNull);
+        expect(source.loadComicPages, isNotNull);
+        expect(source.getThumbnailLoadingConfig, isNotNull);
+        expect(source.getImageLoadingConfig, isNotNull);
+      },
+    );
 
-    test('2. Acquire real comic dynamically via Search & verify absolute thumbnail', () async {
-      final searchRes = await source.searchPageData!.loadPage!('終結的熾天使', 1, <String>[]);
-      expect(searchRes.error, isFalse, reason: 'Search error: ${searchRes.errorMessage}');
-      expect(searchRes.data, isNotNull);
-      expect(searchRes.data, isNotEmpty);
+    test(
+      '2. Acquire real comic dynamically via Search & verify absolute thumbnail',
+      () async {
+        final searchRes = await source.searchPageData!.loadPage!(
+          '終結的熾天使',
+          1,
+          <String>[],
+        );
+        expect(
+          searchRes.error,
+          isFalse,
+          reason: 'Search error: ${searchRes.errorMessage}',
+        );
+        expect(searchRes.data, isNotNull);
+        expect(searchRes.data, isNotEmpty);
 
-      dynamicComic = searchRes.data.first;
-      expect(dynamicComic.title, isNotEmpty);
-      expect(dynamicComic.id, isNotEmpty);
-      expect(dynamicComic.cover, startsWith('http'));
+        dynamicComic = searchRes.data.first;
+        expect(dynamicComic.title, isNotEmpty);
+        expect(dynamicComic.id, isNotEmpty);
+        expect(dynamicComic.cover, startsWith('http'));
 
-      // Real thumbnail download via AppDio
-      final thumbConfig = source.getThumbnailLoadingConfig!(dynamicComic.cover);
-      expect(thumbConfig, isNotNull);
-      final headers = thumbConfig['headers'] as Map?;
+        // Real thumbnail download via AppDio
+        final thumbConfig = await source.getThumbnailLoadingConfig!(
+          dynamicComic.cover,
+          dynamicComic.id,
+        );
+        expect(thumbConfig, isNotNull);
+        final headers = thumbConfig['headers'] as Map?;
 
-      final response = await AppDio().get<List<int>>(
-        dynamicComic.cover,
-        options: Options(
-          responseType: ResponseType.bytes,
-          headers: headers != null ? Map<String, dynamic>.from(headers) : null,
-        ),
-      );
-      expect(response.statusCode, equals(200));
-      expect(response.data, isNotNull);
-      expect(response.data!.length, greaterThan(100));
-      expect(response.headers.value('content-type'), contains('image/'));
-    });
+        final response = await AppDio().get<List<int>>(
+          dynamicComic.cover,
+          options: Options(
+            responseType: ResponseType.bytes,
+            headers: headers != null
+                ? Map<String, dynamic>.from(headers)
+                : null,
+          ),
+        );
+        expect(response.statusCode, equals(200));
+        expect(response.data, isNotNull);
+        expect(response.data!.length, greaterThan(100));
+        expect(response.headers.value('content-type'), contains('image/'));
+      },
+    );
 
-    test('3. Public loadComicInfo extracts real chapters without fallback', () async {
-      expect(dynamicComic.id, isNotEmpty);
+    test(
+      '3. Public loadComicInfo extracts real chapters without fallback',
+      () async {
+        expect(dynamicComic.id, isNotEmpty);
 
-      final detailsRes = await source.loadComicInfo!(dynamicComic.id);
-      expect(detailsRes.error, isFalse, reason: 'loadInfo error: ${detailsRes.errorMessage}');
-      final details = detailsRes.data;
+        final detailsRes = await source.loadComicInfo!(dynamicComic.id);
+        expect(
+          detailsRes.error,
+          isFalse,
+          reason: 'loadInfo error: ${detailsRes.errorMessage}',
+        );
+        final details = detailsRes.data;
 
-      expect(details.title, isNotEmpty);
-      expect(details.chapters, isNotNull);
-      expect(details.chapters!.allChapters.length, greaterThan(0));
+        expect(details.title, isNotEmpty);
+        expect(details.chapters, isNotNull);
+        expect(details.chapters!.allChapters.length, greaterThan(0));
 
-      final allChapters = details.chapters!.allChapters;
-      final keys = allChapters.keys.toList();
-      expect(keys, isNotEmpty);
+        final allChapters = details.chapters!.allChapters;
+        final keys = allChapters.keys.toList();
+        expect(keys, isNotEmpty);
 
-      realEpId = keys.last;
-      expect(realEpId, isNotEmpty);
-      expect(realEpId, isNot(equals('dummy')));
-      expect(realEpId, isNot(equals('/view/9154-1.html')));
+        realEpId = keys.last;
+        expect(realEpId, isNotEmpty);
+        expect(realEpId, isNot(equals('dummy')));
+        expect(realEpId, isNot(equals('/view/9154-1.html')));
 
-      // Chapter sanitization check
-      for (final entry in allChapters.entries) {
-        expect(entry.key, isNotEmpty);
-        expect(entry.value, isNotEmpty);
-        expect(entry.value.contains('document.'), isFalse);
-        expect(entry.value.contains('getElementById'), isFalse);
-        expect(entry.value.contains('<script'), isFalse);
-        expect(entry.value.contains('isnew('), isFalse);
-      }
-    });
+        // Chapter sanitization check
+        for (final entry in allChapters.entries) {
+          expect(entry.key, isNotEmpty);
+          expect(entry.value, isNotEmpty);
+          expect(entry.value.contains('document.'), isFalse);
+          expect(entry.value.contains('getElementById'), isFalse);
+          expect(entry.value.contains('<script'), isFalse);
+          expect(entry.value.contains('isnew('), isFalse);
+        }
+      },
+    );
 
     test('4. Public loadComicPages with real epId & Image Download', () async {
       expect(dynamicComic.id, isNotEmpty);
       expect(realEpId, isNotEmpty);
 
       final pagesRes = await source.loadComicPages!(dynamicComic.id, realEpId);
-      expect(pagesRes.error, isFalse, reason: 'loadComicPages error: ${pagesRes.errorMessage}');
+      expect(
+        pagesRes.error,
+        isFalse,
+        reason: 'loadComicPages error: ${pagesRes.errorMessage}',
+      );
       expect(pagesRes.data, isNotNull);
       expect(pagesRes.data, isNotEmpty);
 
       final firstImage = pagesRes.data.first;
       expect(firstImage, startsWith('http'));
 
-      final imageConfig = await source.getImageLoadingConfig!(firstImage, dynamicComic.id, realEpId);
+      final imageConfig = await source.getImageLoadingConfig!(
+        firstImage,
+        dynamicComic.id,
+        realEpId,
+      );
       expect(imageConfig, isNotNull);
       final headers = imageConfig['headers'] as Map?;
 
@@ -164,26 +205,42 @@ void main() {
       expect(response.headers.value('content-type'), contains('image/'));
     });
 
-    test('5. Public Explore Pages (Popular/Latest) resolves successfully', () async {
-      final popularPage = source.explorePages.firstWhere((p) => p.title == 'Popular' || p.title == 'popular', orElse: () => throw Exception('Popular not found'));
-      final popRes = await popularPage.loadPage!(1);
-      expect(popRes.error, isFalse, reason: 'Explore Popular error: ${popRes.errorMessage}');
-      expect(popRes.data, isNotNull);
-      expect(popRes.data, isNotEmpty);
-      expect(popRes.data.first.title, isNotEmpty);
-      expect(popRes.data.first.cover, startsWith('http'));
+    test(
+      '5. Public Explore Pages (Popular/Latest) resolves successfully',
+      () async {
+        final popularPage = source.explorePages.firstWhere(
+          (p) => p.title == 'Popular' || p.title == 'popular',
+          orElse: () => throw Exception('Popular not found'),
+        );
+        final popRes = await popularPage.loadPage!(1);
+        expect(
+          popRes.error,
+          isFalse,
+          reason: 'Explore Popular error: ${popRes.errorMessage}',
+        );
+        expect(popRes.data, isNotNull);
+        expect(popRes.data, isNotEmpty);
+        expect(popRes.data.first.title, isNotEmpty);
+        expect(popRes.data.first.cover, startsWith('http'));
 
-      try {
-        final latestPage = source.explorePages.firstWhere((p) => p.title == 'Latest' || p.title == 'latest');
-        final latRes = await latestPage.loadPage!(1);
-        expect(latRes.error, isFalse, reason: 'Explore Latest error: ${latRes.errorMessage}');
-        expect(latRes.data, isNotNull);
-        expect(latRes.data, isNotEmpty);
-        expect(latRes.data.first.title, isNotEmpty);
-        expect(latRes.data.first.cover, startsWith('http'));
-      } catch (e) {
-        // Latest might not be present
-      }
-    });
+        try {
+          final latestPage = source.explorePages.firstWhere(
+            (p) => p.title == 'Latest' || p.title == 'latest',
+          );
+          final latRes = await latestPage.loadPage!(1);
+          expect(
+            latRes.error,
+            isFalse,
+            reason: 'Explore Latest error: ${latRes.errorMessage}',
+          );
+          expect(latRes.data, isNotNull);
+          expect(latRes.data, isNotEmpty);
+          expect(latRes.data.first.title, isNotEmpty);
+          expect(latRes.data.first.cover, startsWith('http'));
+        } catch (e) {
+          // Latest might not be present
+        }
+      },
+    );
   });
 }

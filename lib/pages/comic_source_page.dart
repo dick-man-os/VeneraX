@@ -701,11 +701,6 @@ class _BodyState extends State<_Body> {
                   label: Text("Use a config file".tl),
                   onPressed: _selectFile,
                 ),
-                FilledButton.tonalIcon(
-                  icon: const Icon(Icons.help_outline),
-                  label: Text("Help".tl),
-                  onPressed: help,
-                ),
                 _CheckUpdatesButton(),
               ],
             ),
@@ -727,12 +722,6 @@ class _BodyState extends State<_Body> {
       App.rootContext.showMessage(message: e.toString());
       Log.error("Add comic source", "$e\n$s");
     }
-  }
-
-  void help() {
-    launchUrlString(
-      "https://github.com/Kyosee/VeneraX/blob/master/doc/comic_source.md",
-    );
   }
 
   Future<void> handleAddSource(String url, [String? originLibraryId]) async {
@@ -870,10 +859,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
 
   @override
   Widget build(BuildContext context) {
-    return PopUpWidgetScaffold(
-      title: library.name,
-      body: buildBody(),
-    );
+    return PopUpWidgetScaffold(title: library.name, body: buildBody());
   }
 
   Widget buildBody() {
@@ -891,9 +877,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              loadFailed
-                  ? Icons.cloud_off_outlined
-                  : Icons.inbox_outlined,
+              loadFailed ? Icons.cloud_off_outlined : Icons.inbox_outlined,
               size: 48,
               color: context.colorScheme.outline,
             ),
@@ -903,10 +887,7 @@ class _ComicSourceListState extends State<_ComicSourceList> {
               style: ts.s14.copyWith(color: context.colorScheme.outline),
             ),
             const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: load,
-              child: Text("Refresh".tl),
-            ),
+            FilledButton.tonal(onPressed: load, child: Text("Refresh".tl)),
           ],
         ),
       );
@@ -957,6 +938,9 @@ class _ComicSourceListState extends State<_ComicSourceList> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
             child: Row(
+              // Keep the action beside the title once a long description
+              // stretches the card.
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: Column(
@@ -991,13 +975,13 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                       ),
                       if (description != null && description.isNotEmpty) ...[
                         const SizedBox(height: 4),
+                        // Unclamped on purpose: a truncated description hides
+                        // what a plugin actually does, so let it wrap.
                         Text(
                           description,
                           style: ts.s12.copyWith(
                             color: context.colorScheme.outline,
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ],
@@ -1300,9 +1284,7 @@ class _WebdavLibrariesCardState extends State<_WebdavLibrariesCard> {
               children: [
                 Icon(Icons.cloud_outlined, color: context.colorScheme.primary),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text("WebDAV Comic Library".tl, style: ts.s16),
-                ),
+                Expanded(child: Text("WebDAV Comic Library".tl, style: ts.s16)),
                 Text(
                   "@c libraries".tlParams({"c": libraries.length}),
                   style: ts.s12.copyWith(color: context.colorScheme.outline),
@@ -1447,7 +1429,8 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
     final urlController = TextEditingController(text: url);
     showDialog(
       context: App.rootContext,
-      builder: (context) {        return ContentDialog(
+      builder: (context) {
+        return ContentDialog(
           title: "Edit library".tl,
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1537,9 +1520,7 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
     } else if (count == 0) {
       context.showMessage(message: "No updates".tl);
     } else {
-      context.showMessage(
-        message: "@c updates".tlParams({"c": count}),
-      );
+      context.showMessage(message: "@c updates".tlParams({"c": count}));
     }
   }
 
@@ -1661,7 +1642,9 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
                     const SizedBox(height: 2),
                     Text(
                       host,
-                      style: ts.s12.copyWith(color: context.colorScheme.outline),
+                      style: ts.s12.copyWith(
+                        color: context.colorScheme.outline,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1791,7 +1774,11 @@ void _validatePages() {
   List networkFavorites = appdata.settings['favorites'];
 
   var totalExplorePages = ComicSource.all()
-      .map((e) => e.explorePages.map((p) => ExplorePageIdentity.create(e.key, p.title)))
+      .map(
+        (e) => e.explorePages.map(
+          (p) => ExplorePageIdentity.create(e.key, p.title),
+        ),
+      )
       .expand((element) => element)
       .toList();
   var totalCategoryPages = ComicSource.all()
@@ -1806,10 +1793,14 @@ void _validatePages() {
       .toList();
 
   for (var page in List.from(explorePages)) {
-    var normalized = ExplorePageIdentity.normalize(page.toString(), ComicSource.all());
+    var normalized = ExplorePageIdentity.normalize(
+      page.toString(),
+      ComicSource.all(),
+    );
     if (normalized != page) {
       explorePages.remove(page);
-      if (totalExplorePages.contains(normalized) && !explorePages.contains(normalized)) {
+      if (totalExplorePages.contains(normalized) &&
+          !explorePages.contains(normalized)) {
         explorePages.add(normalized);
       }
     } else if (!totalExplorePages.contains(page)) {
@@ -2152,10 +2143,7 @@ class _SortModeBanner extends StatelessWidget {
             const Icon(Icons.swap_vert, size: 20),
             const SizedBox(width: 12),
             Expanded(child: Text("Drag to reorder".tl, style: ts.s14)),
-            TextButton(
-              onPressed: onSortByName,
-              child: Text("Sort by name".tl),
-            ),
+            TextButton(onPressed: onSortByName, child: Text("Sort by name".tl)),
             FilledButton(onPressed: onDone, child: Text("Done".tl)),
           ],
         ),
@@ -2165,11 +2153,7 @@ class _SortModeBanner extends StatelessWidget {
 }
 
 class _SortTile extends StatelessWidget {
-  const _SortTile({
-    super.key,
-    required this.source,
-    required this.index,
-  });
+  const _SortTile({super.key, required this.source, required this.index});
 
   final ComicSource source;
   final int index;
@@ -2569,9 +2553,7 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: context
-                                    .colorScheme
-                                    .secondaryContainer,
+                                color: context.colorScheme.secondaryContainer,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text("v${entry.version}", style: ts.s12),
@@ -3011,7 +2993,6 @@ class _LoginPageState extends State<_LoginPage> {
       });
     }
   }
-
 
   void loginWithWebview() async {
     var url = widget.config.loginWebsite!;

@@ -596,59 +596,40 @@ class _SingleBottomNaviWidgetState extends State<_SingleBottomNaviWidget>
   Widget buildContent() {
     final value = controller.value;
     final colorScheme = Theme.of(context).colorScheme;
-    final labelStyle = Theme.of(context).textTheme.labelSmall;
     final icon = Icon(
       widget.enabled ? widget.entry.activeIcon : widget.entry.icon,
     );
-    return Center(
-      child: SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: 30,
-              child: Container(
-                width: 64,
-                decoration: BoxDecoration(
-                  borderRadius: const BorderRadius.all(Radius.circular(12)),
-                  color: isHovering
-                      ? colorScheme.surfaceContainer
-                      : Colors.transparent,
-                ),
-                child: Center(
-                  child: Container(
-                    width: 32 + value * 32,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.all(Radius.circular(12)),
-                      color: value != 0
-                          ? colorScheme.secondaryContainer
-                          : Colors.transparent,
-                    ),
-                    child: Center(child: icon),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            SizedBox(
-              height: 18,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Text(
-                  widget.entry.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  softWrap: false,
-                  textAlign: TextAlign.center,
-                  style: labelStyle,
-                ),
-              ),
-            ),
-          ],
+    final iconSlot = SizedBox(
+      height: 30,
+      child: Container(
+        width: 64,
+        decoration: BoxDecoration(
+          borderRadius: const BorderRadius.all(Radius.circular(12)),
+          color: isHovering ? colorScheme.surfaceContainer : Colors.transparent,
         ),
+        child: Center(
+          child: Container(
+            width: 32 + value * 32,
+            height: 28,
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.all(Radius.circular(12)),
+              color: value != 0
+                  ? colorScheme.secondaryContainer
+                  : Colors.transparent,
+            ),
+            child: Center(child: icon),
+          ),
+        ),
+      ),
+    );
+    final content = Center(child: iconSlot);
+    return Semantics(
+      button: true,
+      label: widget.entry.label,
+      selected: widget.enabled,
+      child: Tooltip(
+        message: widget.entry.label,
+        child: SizedBox(width: double.infinity, height: 52, child: content),
       ),
     );
   }
@@ -782,9 +763,16 @@ class _NaviMainViewState extends State<_NaviMainView> {
           child: MediaQuery.removePadding(
             context: context,
             removeTop: shouldShowAppBar,
-            child: AnimatedSwitcher(
-              duration: _fastAnimationDuration,
-              child: state.buildMainViewContent(),
+            // Keep the page slot tight to the main pane width.  The default
+            // AnimatedSwitcher layout is intentionally intrinsic/centered;
+            // without an explicit width constraint a page whose content has a
+            // natural max width can leave a large unused area on wide desktop
+            // windows (the home feed is the most visible example).
+            child: SizedBox.expand(
+              child: AnimatedSwitcher(
+                duration: _fastAnimationDuration,
+                child: state.buildMainViewContent(),
+              ),
             ),
           ),
         ),

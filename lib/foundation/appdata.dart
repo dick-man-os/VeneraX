@@ -128,11 +128,14 @@ class Appdata with Init {
     // Launcher icon is a per-device choice: the alias enabled on this device's
     // system must not propagate to (or be overwritten by) another device.
     "appLauncherIcon",
-    // Per-source origin/offering provenance is device-local: originId reflects
-    // where THIS device installed each source, and libraryIds/updateLibraryId
-    // are rebuilt from the library list on every update check. Syncing it
-    // whole-blob would let one device's map overwrite another's non-derivable
-    // originId. The library list itself (comicSourceLibraries) still syncs.
+    // Per-source offering provenance is device-local: libraryIds and
+    // updateLibraryId are rebuilt from the library list on every update check,
+    // and syncing the map whole-blob would let one device's copy overwrite
+    // another's records. The install origin inside it — which library a source
+    // updates through, the one part the user actually chose — is mirrored into
+    // `comicSourceOrigins`, which does sync and merges per key
+    // (ComicSourceLibraryManager.adoptSyncedOrigins). The library list itself
+    // (comicSourceLibraries) syncs too.
     "comicSourceProvenance",
     // Night mode's on/off state is device-local runtime state, not a portable
     // preference (#125). When "follow system dark mode" is on it's purely
@@ -387,6 +390,16 @@ class Settings with ChangeNotifier {
     'checkUpdateOnStart': true,
     'autoCleanHistoryDays': '0', // retention days; '0' keeps history forever
     'limitImageWidth': true,
+    // Image width as a percentage of viewport height when limitImageWidth is on
+    // (40 - 150). Above the window's own width/height ratio the cap stops
+    // applying, so the top of the range behaves like "unlimited". Stored as an
+    // int percent so the settings slider's steps land on exact values.
+    'imageWidthPercent': 70,
+    // Desktop only: enter fullscreen automatically when the reader opens.
+    'autoFullscreenOnRead': false,
+    // Drop a comic from "Read Later" once reading it starts; history takes over
+    // from there.
+    'autoRemoveFromReadLater': false,
     'webdav': [], // empty means not configured
     // Whether the local comic library manifest (local.db) is included in
     // WebDAV data sync. Device-local (see _disableSync). Off lets a device

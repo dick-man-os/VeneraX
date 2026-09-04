@@ -29,10 +29,9 @@ double estimateContinuousTurnOffset({
 /// the latest intended target.
 class ContinuousPageTurnCoordinator<T> {
   ContinuousPageTurnCoordinator({
-    required ContinuousPageTurnAction<T> prepare,
-    required ContinuousPageTurnAction<T> navigate,
-  }) : _prepare = prepare,
-       _navigate = navigate;
+    required this._prepare,
+    required this._navigate,
+  });
 
   final ContinuousPageTurnAction<T> _prepare;
   final ContinuousPageTurnAction<T> _navigate;

@@ -154,10 +154,7 @@ abstract class WebdavLibrary {
 /// each library as a native source lets all of that work unchanged — and gives
 /// two servers holding a same-named folder separate reading state.
 class WebdavLibraryClient {
-  WebdavLibraryClient(
-    this.config, {
-    webdav.Client Function(Duration timeout)? clientFactory,
-  }) : _clientFactory = clientFactory;
+  WebdavLibraryClient(this.config, {this._clientFactory});
 
   final WebdavLibraryConfig config;
   final webdav.Client Function(Duration timeout)? _clientFactory;

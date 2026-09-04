@@ -45,6 +45,9 @@ extension _FutureInit<T> on Future<T> {
 /// Only includes what's needed for theme, locale, and basic app state.
 Future<void> init() async {
   await App.init().wait();
+  if (App.isAndroid) {
+    startAppLinkCapture();
+  }
   await appdata.init().wait();
   await AppTranslation.init().wait();
   if (App.isWindows) {
@@ -89,7 +92,9 @@ Future<void> initDeferred() async {
     }
     FlutterError.onError = (details) {
       Log.error(
-          "Unhandled Exception", "${details.exception}\n${details.stack}");
+        "Unhandled Exception",
+        "${details.exception}\n${details.stack}",
+      );
     };
   } catch (e, s) {
     Log.error("init", "$e\n$s");
@@ -109,7 +114,10 @@ void _checkOldConfigs() {
   // Migrate legacy explore_pages titles to composite identities
   var explorePages = appdata.settings['explore_pages'];
   if (explorePages is List) {
-    var newExplorePages = ExplorePageIdentity.migrateLegacyList(explorePages, ComicSource.all());
+    var newExplorePages = ExplorePageIdentity.migrateLegacyList(
+      explorePages,
+      ComicSource.all(),
+    );
     if (newExplorePages != null) {
       appdata.settings['explore_pages'] = newExplorePages;
       appdata.saveData();
@@ -136,13 +144,14 @@ void _checkOldConfigs() {
   // manual; everything else gets the historical default, realtime.
   if (appdata.implicitData['webdavSyncMode'] == null) {
     var webdavConfig = appdata.settings['webdav'];
-    var configured = webdavConfig is List &&
+    var configured =
+        webdavConfig is List &&
         webdavConfig.length == 3 &&
         webdavConfig.whereType<String>().length == 3;
     appdata.implicitData['webdavSyncMode'] =
         (appdata.implicitData['webdavAutoSync'] == false && configured)
-            ? WebdavSyncMode.manual.name
-            : WebdavSyncMode.realtime.name;
+        ? WebdavSyncMode.manual.name
+        : WebdavSyncMode.realtime.name;
     appdata.writeImplicitData();
   }
 }
@@ -153,14 +162,18 @@ void _checkOldConfigs() {
 /// never block app launch.
 void _autoCleanHistory() {
   var raw = appdata.settings['autoCleanHistoryDays'];
-  var days = raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '') ?? 0;
+  var days = raw is num
+      ? raw.toInt()
+      : int.tryParse(raw?.toString() ?? '') ?? 0;
   if (days <= 0) return;
   try {
-    var removed =
-        HistoryManager().cleanHistoryOlderThan(Duration(days: days));
+    var removed = HistoryManager().cleanHistoryOlderThan(Duration(days: days));
     if (removed > 0) {
-      Log.info("History", "Auto-cleaned $removed history record(s) older "
-          "than $days day(s).");
+      Log.info(
+        "History",
+        "Auto-cleaned $removed history record(s) older "
+            "than $days day(s).",
+      );
     }
   } catch (e, s) {
     Log.error("History", "Auto-clean failed: $e", s);

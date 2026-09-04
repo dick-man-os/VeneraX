@@ -1,5 +1,6 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/background_keepalive.dart';
@@ -11,6 +12,8 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/home_layout.dart';
+import 'package:venera/foundation/image_translation/translation_service.dart';
+import 'package:venera/foundation/image_translation/translation_store.dart';
 import 'package:venera/foundation/read_later.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -21,11 +24,13 @@ import 'package:venera/pages/webdav_library_page.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
+import 'package:venera/pages/guide_page.dart';
 import 'package:venera/pages/history_page.dart';
 import 'package:venera/pages/read_later_page.dart';
 import 'package:venera/pages/image_favorites_page/image_favorites_page.dart';
 import 'package:venera/pages/reading_statistics_page.dart';
 import 'package:venera/pages/search_page.dart';
+import 'package:venera/pages/translated_comics_page.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/tags_translation.dart';
@@ -33,7 +38,15 @@ import 'package:venera/utils/translations.dart';
 
 import 'local_comics_page.dart';
 
-const _homeContentMaxWidth = 1180.0;
+Size _homeComicTileSize(BuildContext context) {
+  final width = context.width;
+  final tileWidth = width >= 1400
+      ? 112.0
+      : width >= 900
+      ? 106.0
+      : 98.0;
+  return Size(tileWidth, tileWidth * 136 / 98);
+}
 
 TextStyle _homeSectionTitleStyle(BuildContext context) {
   return Theme.of(
@@ -65,11 +78,18 @@ class _HomeSectionSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(8);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Material(
         color: context.colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(8),
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(
+            color: context.colorScheme.outlineVariant.toOpacity(0.35),
+            width: 0.6,
+          ),
+        ),
         clipBehavior: Clip.antiAlias,
         child: child,
       ),
@@ -186,6 +206,9 @@ class _HomePageState extends State<HomePage> {
     return switch (id) {
       'history' => const _History(key: ValueKey('history')),
       'readLater' => const _ReadLater(key: ValueKey('readLater')),
+      'translatedComics' => const _TranslatedComics(
+        key: ValueKey('translatedComics'),
+      ),
       'local' => const _Local(key: ValueKey('local')),
       'followUpdates' => const FollowUpdatesWidget(
         key: ValueKey('followUpdates'),
@@ -280,16 +303,21 @@ class _HomePageState extends State<HomePage> {
         slivers: slivers,
       ),
     );
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: context.width > changePoint ? 16 : 0,
-      ),
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _homeContentMaxWidth),
-          child: widget,
+    return PopScope(
+      canPop: !editMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && editMode) {
+          _exitEditMode();
+        }
+      },
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.width > changePoint ? 16 : 0,
         ),
+        // The main pane already supplies the correct width beside the sidebar.
+        // Keep the feed fluid so wide desktop windows do not leave a centered
+        // column and a large unused area on the right.
+        child: SizedBox(width: double.infinity, child: widget),
       ),
     );
   }
@@ -637,6 +665,7 @@ class _HistoryState extends State<_History> {
 
   @override
   Widget build(BuildContext context) {
+    final tileSize = _homeComicTileSize(context);
     return SliverToBoxAdapter(
       child: _HomeSectionSurface(
         child: Column(
@@ -661,7 +690,7 @@ class _HistoryState extends State<_History> {
             ),
             if (history.isNotEmpty)
               SizedBox(
-                height: 136,
+                height: tileSize.height + 4,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   itemCount: history.length,
@@ -670,6 +699,8 @@ class _HistoryState extends State<_History> {
                     return SimpleComicTile(
                       comic: history[index],
                       heroID: heroID,
+                      width: tileSize.width,
+                      height: tileSize.height,
                       onTap: () {
                         context.to(
                           () => ComicPage(
@@ -772,6 +803,7 @@ class _ReadLaterState extends State<_ReadLater> {
   }
 
   Widget _readLaterInk(BuildContext context) {
+    final tileSize = _homeComicTileSize(context);
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: () {
@@ -792,7 +824,7 @@ class _ReadLaterState extends State<_ReadLater> {
             ),
           ).paddingHorizontal(16),
           SizedBox(
-            height: 136,
+            height: tileSize.height + 4,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: items.length,
@@ -801,11 +833,146 @@ class _ReadLaterState extends State<_ReadLater> {
                 return SimpleComicTile(
                   comic: items[index],
                   heroID: heroID,
+                  width: tileSize.width,
+                  height: tileSize.height,
                 ).paddingHorizontal(8).paddingVertical(2);
               },
             ),
           ).paddingHorizontal(8).paddingBottom(16),
         ],
+      ),
+    );
+  }
+}
+
+class _TranslatedComics extends StatefulWidget {
+  const _TranslatedComics({super.key});
+
+  @override
+  State<_TranslatedComics> createState() => _TranslatedComicsState();
+}
+
+class _TranslatedComicsState extends State<_TranslatedComics> {
+  List<StoredTranslationComic> items = const [];
+  var count = 0;
+
+  void _reload() {
+    if (!TranslationStore().isInitialized) return;
+    var all = ImageTranslationService.translatedComics;
+    var translatedKeys = {
+      for (var item in all) '${item.sourceKey}\u0000${item.comicId}',
+    };
+    var enabledOnly = ImageTranslationService.enabledComicKeys.where((key) {
+      var separator = key.lastIndexOf('@');
+      if (separator <= 0 || separator == key.length - 1) return false;
+      var comicId = key.substring(0, separator);
+      var sourceKey = key.substring(separator + 1);
+      return !translatedKeys.contains('$sourceKey\u0000$comicId');
+    }).length;
+    if (mounted) {
+      setState(() {
+        items = all.take(20).toList();
+        count = all.length + enabledOnly;
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    var all = ImageTranslationService.translatedComics;
+    items = all.take(20).toList();
+    var translatedKeys = {
+      for (var item in all) '${item.sourceKey}\u0000${item.comicId}',
+    };
+    var enabledOnly = ImageTranslationService.enabledComicKeys.where((key) {
+      var separator = key.lastIndexOf('@');
+      if (separator <= 0 || separator == key.length - 1) return false;
+      var comicId = key.substring(0, separator);
+      var sourceKey = key.substring(separator + 1);
+      return !translatedKeys.contains('$sourceKey\u0000$comicId');
+    }).length;
+    count = all.length + enabledOnly;
+    TranslationStore().addListener(_reload);
+    ImageTranslationService.instance.addListener(_reload);
+    unawaited(hydrateTranslatedComicMetadata());
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    TranslationStore().removeListener(_reload);
+    ImageTranslationService.instance.removeListener(_reload);
+    super.dispose();
+  }
+
+  Comic _asComic(StoredTranslationComic item) {
+    return Comic(
+      item.title.isEmpty ? item.comicId : item.title,
+      item.cover,
+      item.comicId,
+      null,
+      const [],
+      '',
+      item.sourceKey,
+      null,
+      null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty && count == 0) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    final tileSize = _homeComicTileSize(context);
+    return SliverToBoxAdapter(
+      child: _HomeSectionSurface(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => context.to(() => const TranslatedComicsPage()),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 56,
+                child: Row(
+                  children: [
+                    _homeSectionIcon(context, Icons.translate_rounded),
+                    const SizedBox(width: 12),
+                    _HomeSectionTitle(
+                      title: 'Translation Library'.tl,
+                      count: count,
+                    ),
+                    _homeChevron(context),
+                  ],
+                ),
+              ).paddingHorizontal(16),
+              if (items.isNotEmpty)
+                SizedBox(
+                  height: tileSize.height + 4,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: items.length,
+                    itemBuilder: (context, index) {
+                      var item = items[index];
+                      return SimpleComicTile(
+                        comic: _asComic(item),
+                        heroID: Object.hash(
+                          item.sourceKey,
+                          item.comicId,
+                          item.sourceLang,
+                          item.targetLang,
+                        ),
+                        width: tileSize.width,
+                        height: tileSize.height,
+                        onTap: () => openTranslatedChaptersPage(context, item),
+                      ).paddingHorizontal(8).paddingVertical(2);
+                    },
+                  ),
+                ).paddingHorizontal(8).paddingBottom(16),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -845,6 +1012,7 @@ class _LocalState extends State<_Local> {
 
   @override
   Widget build(BuildContext context) {
+    final tileSize = _homeComicTileSize(context);
     return SliverToBoxAdapter(
       child: _HomeSectionSurface(
         child: InkWell(
@@ -875,7 +1043,7 @@ class _LocalState extends State<_Local> {
               ).paddingHorizontal(16),
               if (local.isNotEmpty)
                 SizedBox(
-                  height: 136,
+                  height: tileSize.height + 4,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: local.length,
@@ -884,6 +1052,8 @@ class _LocalState extends State<_Local> {
                       return SimpleComicTile(
                         comic: local[index],
                         heroID: heroID,
+                        width: tileSize.width,
+                        height: tileSize.height,
                         onTap: () {
                           context.to(
                             () => ComicPage(
@@ -1102,8 +1272,10 @@ class _ImportComicsWidgetState extends State<ImportComicsWidget> {
             ],
           ),
           onPressed: () {
-            launchUrlString(
-              "https://github.com/Kyosee/VeneraX/blob/master/doc/import_comic.md",
+            GuidePage.openDocument(
+              context,
+              assetPath: 'doc/import_comic.md',
+              title: "Import Comics".tl,
             );
           },
         ).fixWidth(90).paddingRight(8),
@@ -1902,8 +2074,14 @@ class __ChartLineState extends State<_ChartLine>
                       borderRadius: BorderRadius.circular(2),
                       gradient: LinearGradient(
                         colors: context.isDarkMode
-                            ? [Colors.blue.shade800, Colors.blue.shade500]
-                            : [Colors.blue.shade300, Colors.blue.shade600],
+                            ? [
+                                context.colorScheme.primary.toOpacity(0.72),
+                                context.colorScheme.primary,
+                              ]
+                            : [
+                                context.colorScheme.primaryContainer,
+                                context.colorScheme.primary,
+                              ],
                       ),
                     ),
                   ).toAlign(Alignment.centerLeft);

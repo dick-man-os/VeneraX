@@ -46,9 +46,14 @@ VeneraX is a free and open-source, multi-platform comic reader forked from Vener
 
 Setup steps and interactions for each feature are documented in the **[guide](doc/guide.en.md)**. It is also available in the app under Settings → About → Guide.
 
-## Quick Start
+## Building
 
-### Native App
+<details>
+<summary><b>Local build</b></summary>
+
+1. Install [Flutter](https://flutter.dev/docs/get-started/install)
+2. Clone the repository and run `flutter pub get`
+3. Build for your platform:
 
 ```bash
 flutter build apk        # Android
@@ -57,10 +62,81 @@ flutter build linux      # Linux
 flutter build macos      # macOS
 ```
 
-## Build from Source
+Android needs a signing key first — see "Android signing" in the next section.
 
-1. Clone the repository
-2. Install [Flutter](https://flutter.dev/docs/get-started/install)
+</details>
+
+<details>
+<summary><b>Building on your own GitHub</b></summary>
+
+After forking, you can produce installers with GitHub Actions without setting up a local toolchain.
+
+**1. Enable Actions**
+
+Workflows are disabled in a fresh fork. Open the Actions tab and enable them.
+
+**2. Build a single platform**
+
+Actions → **Build ALL** → Run workflow → pick `windows` / `linux` / `macos` / `ios` / `android` under platform. Download the result from that run's Artifacts.
+
+Windows, Linux, macOS and iOS build with no configuration, but the output is unsigned:
+
+- iOS produces an unsigned ipa; sign it yourself before sideloading.
+- macOS produces an unsigned, un-notarized dmg; right-click → Open the first time.
+
+**3. Android signing**
+
+Android requires your own signing key, otherwise the build fails outright. Generate one:
+
+```bash
+keytool -genkey -v -keystore venera.jks -keyalg RSA -keysize 2048 -validity 10000 -alias venera
+base64 -w0 venera.jks    # use base64 -i venera.jks on macOS
+```
+
+Add four secrets under Settings → Secrets and variables → Actions:
+
+| Name | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | output of the base64 command above |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore password |
+| `ANDROID_KEY_ALIAS` | alias, `venera` in the example |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+For local builds, put the same values in `android/key.properties` (the file is never committed):
+
+```properties
+storeFile=/absolute/path/venera.jks
+storePassword=your keystore password
+keyAlias=venera
+keyPassword=your key password
+```
+
+**Note:** an APK you sign yourself has a different certificate from the released build, so it cannot be installed over it — you must uninstall first. Uninstalling erases app data, so export a backup from inside the app beforehand.
+
+**4. Repoint the update check**
+
+If you intend to distribute your builds, you must first edit the two constants at the top of [`lib/pages/settings/about.dart`](lib/pages/settings/about.dart):
+
+```dart
+const kUpdateRepoOwner = 'Kyosee';
+const kUpdateRepoName = 'VeneraX';
+```
+
+Change them to your own username and repository name. The update check, update-package download, changelog fetch, and the repository link on the About page all resolve through these.
+
+Leaving them unchanged has two consequences: on startup ("Check for updates on startup" is on by default) the app queries this repository's latest release, so your own releases are never detected; and on Windows, clicking "Update Now" installs this repository's build over yours, replacing your version with ours.
+
+**5. Tag-triggered releases (optional)**
+
+Pushing a `v*` tag builds every platform and creates a Release. Three things need attention in a fork:
+
+- `release-notes/<tag>.en.md` and `release-notes/<tag>.zh-CN.md` must exist and be non-empty.
+- The tag must equal `v` plus the version in `pubspec.yaml` (excluding anything after `+`).
+- The `Verify Android signature continuity` step compares the APK certificate against the previous Release. A fork has no previous Release, so this step always fails — and since Release depends on every platform build, one failure means no assets at all. Remove that step before your first release.
+
+Also: the two `Update_AltStore_*` jobs commit an AltStore manifest back to master and can be deleted if unused; private repos may never get an `ubuntu-22.04-arm` runner and queue forever, so `Build_Linux_ARM64` can be dropped there.
+
+</details>
 
 ## Migration
 
@@ -106,7 +182,15 @@ This project has not established and does not operate any official community, gr
 1. To the maximum extent permitted by applicable law, this project and its maintainers shall not be liable for any direct, indirect, incidental, special, punitive, or consequential losses arising from the use of or inability to use this software, or from third-party extensions, third-party websites, network conditions, data loss, device failure, account issues, copyright disputes, or similar causes. Users shall evaluate and bear all risks of using this software.
 2. This project does not guarantee compatibility with any third-party website, extension, or service, nor the continued availability of any feature.
 
-**7. Miscellaneous**
+**7. Derivative Work and Redistribution**
+
+1. This project is a modified version of Venera, independently developed and published by this project's maintainers; the upstream project and its maintainers bear no responsibility for this project's code, builds, or conduct. The allocation of responsibility in this section runs both ways and applies equally to any version derived from this project.
+2. Any version modified, built, or distributed from this project's source code (including forks, private builds, and self-signed installers) is the sole responsibility of whoever publishes that version. This project's maintainers do not review, endorse, or support such versions, and bear no responsibility for their code, builds, conduct, or any consequences thereof.
+3. A modified version should be published under a distinguishable name and state prominently that it is a modified version of this project; it must not claim authorization or endorsement from this project, or any affiliation with it.
+4. Only the builds provided on this repository's Release page are published by this project. Installers obtained through other channels, and any build that ships preset extension scripts, extension repository addresses, or content-source lists, are unrelated to this project; their integrity, security, and compliance are the responsibility of whoever provides them.
+5. Whoever publishes a modified version shall fulfill the obligations in the LICENSE themselves and comply with the laws and regulations of their own jurisdiction, bearing the resulting responsibility.
+
+**8. Miscellaneous**
 
 1. Do not promote or advertise this project on any public or official platforms or official account areas (including but not limited to Weibo, WeChat Official Accounts, X, etc.).
 2. This software is licensed and distributed under the license set out in the LICENSE file at the root of the repository; this disclaimer does not modify or limit the rights granted by that license, and the license prevails in case of conflict.

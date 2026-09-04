@@ -45,9 +45,14 @@ VeneraX 是一个 Fork 自 Venera 并在原版基础上进行维护与增强，�
 
 各功能的配置步骤与操作方式详见 **[使用说明](doc/guide.zh.md)**。应用内亦可查阅：设置 → 关于 → 使用说明。
 
-## 快速开始
+## 构建
 
-### 原生应用
+<details>
+<summary><b>本地构建</b></summary>
+
+1. 安装 [Flutter](https://flutter.dev/docs/get-started/install)
+2. 克隆仓库，执行 `flutter pub get`
+3. 按平台构建：
 
 ```bash
 flutter build apk        # Android
@@ -56,10 +61,81 @@ flutter build linux      # Linux
 flutter build macos      # macOS
 ```
 
-## 从源码构建
+Android 需要先准备签名密钥，见下一节的「Android 签名」。
 
-1. 克隆仓库
-2. 安装 [Flutter](https://flutter.dev/docs/get-started/install)
+</details>
+
+<details>
+<summary><b>在自己的 GitHub 上构建</b></summary>
+
+fork 本仓库后可以直接用 GitHub Actions 出安装包，不必配置本地环境。
+
+**1. 启用 Actions**
+
+fork 出来的仓库默认停用工作流，进 Actions 页点一下按钮启用。
+
+**2. 构建单个平台**
+
+Actions → **Build ALL** → Run workflow → 在 platform 里选 `windows` / `linux` / `macos` / `ios` / `android`，跑完在这次 run 的 Artifacts 里下载。
+
+Windows、Linux、macOS、iOS 不需要任何配置就能构建，但产物没有签名：
+
+- iOS 是未签名 ipa，需要自行签名后侧载。
+- macOS 是未签名、未公证的 dmg，首次打开要右键 → 打开。
+
+**3. Android 签名**
+
+Android 必须自己准备签名密钥，否则构建会直接失败。生成密钥：
+
+```bash
+keytool -genkey -v -keystore venera.jks -keyalg RSA -keysize 2048 -validity 10000 -alias venera
+base64 -w0 venera.jks    # macOS 用 base64 -i venera.jks
+```
+
+在仓库 Settings → Secrets and variables → Actions 添加 4 个 secret：
+
+| 名称 | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | 上一步 base64 的输出 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | 别名，上例为 `venera` |
+| `ANDROID_KEY_PASSWORD` | key 密码 |
+
+本地构建则把同样的信息写进 `android/key.properties`（该文件不会被提交）：
+
+```properties
+storeFile=/绝对路径/venera.jks
+storePassword=你的 keystore 密码
+keyAlias=venera
+keyPassword=你的 key 密码
+```
+
+**注意：** 自己签名的 APK 与本仓库发布版签名不同，无法覆盖安装，需要先卸载。卸载会清除应用数据，请先在应用内导出备份。
+
+**4. 改掉检查更新指向的仓库**
+
+如果要把构建产物分发出去，必须先改 [`lib/pages/settings/about.dart`](lib/pages/settings/about.dart) 开头的两个常量：
+
+```dart
+const kUpdateRepoOwner = 'Kyosee';
+const kUpdateRepoName = 'VeneraX';
+```
+
+改成自己的用户名和仓库名。检查更新、下载更新包、更新日志、关于页的仓库链接都由这两个常量决定。
+
+不改会有两个后果：应用启动时（「启动时检查更新」默认开启）会去查本仓库的最新版本，自己发的版本永远不会被检测到；Windows 上用户点「立即更新」会直接把本仓库的产物覆盖安装上去，等于把自己的版本换成了本仓库的版本。
+
+**5. 打 tag 自动发布（可选）**
+
+推送 `v*` tag 会触发全平台构建并创建 Release，fork 后需要先处理三处：
+
+- `release-notes/<tag>.en.md` 和 `release-notes/<tag>.zh-CN.md` 必须存在且非空。
+- tag 必须等于 `v` 加 `pubspec.yaml` 里的版本号（不含 `+` 之后的部分）。
+- Android 构建里的 `Verify Android signature continuity` 会比对上一个 Release 的 APK 签名。fork 仓库没有历史 Release，这一步必然失败，而 Release 依赖全部平台构建成功，一个失败就不会产出任何文件——首次发布前请删掉这一步。
+
+另外，两个 `Update_AltStore_*` 任务会把 AltStore 清单自动提交回 master，不需要可以删除；私有仓库可能拿不到 `ubuntu-22.04-arm` runner 而一直排队，可删除 `Build_Linux_ARM64`。
+
+</details>
 
 ## 迁移提示
 
@@ -105,7 +181,15 @@ flutter build macos      # macOS
 1. 在适用法律允许的最大范围内，本项目及维护者不对因使用或无法使用本软件，或因第三方扩展、第三方网站、网络环境、数据丢失、设备故障、账号异常、版权纠纷等原因造成的任何直接、间接、附带、特殊、惩罚性或后果性损失承担责任。使用者应自行评估并承担使用本软件的一切风险。
 2. 本项目不保证与任何第三方网站、扩展或服务保持兼容，亦不保证任何功能持续可用。
 
-**七、其他**
+**七、二次开发与分发**
+
+1. 本项目是基于 Venera 修改的版本，由本项目维护者独立开发与发布，原项目及其维护者不对本项目的代码、构建产物及行为承担任何责任。本章的责任划分是双向的，同样适用于任何基于本项目再次修改的版本。
+2. 任何基于本项目源码修改、构建或分发的版本（包括 fork、私有构建、自行签名的安装包），均由该版本的发布者独立负责。本项目维护者不审查、不背书、不提供技术支持，亦不对其代码、构建产物、行为及由此产生的任何后果承担责任。
+3. 修改版本应以可区分的名称发布，并在显著位置说明其为基于本项目的修改版本；不得声称获得本项目授权、认可，或与本项目存在隶属关系。
+4. 仅本仓库 Release 页面提供的构建产物由本项目发布。经其他渠道获取的安装包，以及任何预置了扩展脚本、扩展地址或内容源清单的构建产物，均与本项目无关，其完整性、安全性与合规性由提供者自行负责。
+5. 修改版本的发布者应自行履行 LICENSE 所载义务，并遵守其所在司法管辖区的法律法规，由此产生的责任自行承担。
+
+**八、其他**
 
 1. 禁止在各类公开/官方平台及官方账号区域（包括但不限于微博、微信公众号、X 等）宣传或推广本项目。
 2. 本软件依据仓库根目录 LICENSE 文件所载许可证授权分发；本声明不修改、不限制该许可证授予的权利，如两者存在冲突，以许可证为准。

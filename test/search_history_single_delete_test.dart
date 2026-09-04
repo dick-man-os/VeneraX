@@ -107,6 +107,11 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 20));
     }
+    // Drain any save that overlapped a prior unawaited UI-triggered save. This
+    // runs outside FakeAsync so Appdata's 20 ms serialization wait cannot leave
+    // a pending timer behind when the widget test is disposed.
+    await tester.runAsync(() => appdata.saveData(false));
+    await tester.pump();
   }
 
   testWidgets('delete removes only its row without triggering search', (

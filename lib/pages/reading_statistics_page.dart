@@ -1,25 +1,66 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/reading_statistics.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/utils/translations.dart';
 
-class ReadingStatisticsPage extends StatelessWidget {
-  const ReadingStatisticsPage({super.key, this.summary, this.onClear});
+const _sortKey = 'reading_statistics_sort';
+
+Comic _readingStatisticsComic(ComicReadingStatistics comic) => Comic(
+  comic.title,
+  comic.cover,
+  comic.id,
+  comic.subtitle,
+  null,
+  '',
+  comic.type.sourceKey,
+  null,
+  null,
+);
+
+class ReadingStatisticsPage extends StatefulWidget {
+  const ReadingStatisticsPage({
+    super.key,
+    this.summary,
+    this.onClear,
+    this.onDelete,
+  });
 
   /// Test seam for rendering the page without opening the history database.
   final ReadingStatisticsSummary? summary;
   final VoidCallback? onClear;
+  final ValueChanged<ComicReadingStatistics>? onDelete;
+
+  @override
+  State<ReadingStatisticsPage> createState() => _ReadingStatisticsPageState();
+}
+
+class _ReadingStatisticsPageState extends State<ReadingStatisticsPage> {
+  late ReadingStatisticsSortType sortType;
+
+  @override
+  void initState() {
+    final syncedValue = appdata.settings[_sortKey];
+    final storedValue = syncedValue ?? appdata.implicitData[_sortKey];
+    sortType = ReadingStatisticsSortType.fromString(storedValue?.toString());
+    if (syncedValue == null && storedValue != null) {
+      appdata.settings[_sortKey] = sortType.value;
+      unawaited(appdata.saveData());
+    }
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (summary != null) {
-      return _buildPage(context, summary!);
+    if (widget.summary != null) {
+      return _buildPage(context, widget.summary!);
     }
     return ListenableBuilder(
       listenable: HistoryManager(),
@@ -31,12 +72,25 @@ class ReadingStatisticsPage extends StatelessWidget {
 
   Widget _buildPage(BuildContext context, ReadingStatisticsSummary data) {
     final hasData = data.total > Duration.zero;
+    final comics = sortComicReadingStatistics(
+      data.recentComics
+          .where((comic) => isBlocked(_readingStatisticsComic(comic)) == null)
+          .toList(),
+      sortType,
+    );
     return Scaffold(
       body: CustomScrollView(
         slivers: [
           SliverAppbar(
             title: Text('Reading Statistics'.tl),
             actions: [
+              if (comics.isNotEmpty)
+                IconButton(
+                  key: const Key('sort-reading-statistics'),
+                  icon: const Icon(Icons.sort),
+                  tooltip: 'Sort'.tl,
+                  onPressed: _showSortDialog,
+                ),
               IconButton(
                 key: const Key('clear-reading-statistics'),
                 icon: const Icon(Icons.delete_outline),
@@ -81,7 +135,7 @@ class ReadingStatisticsPage extends StatelessWidget {
                 ),
               ),
             ),
-            if (data.recentComics.isEmpty)
+            if (comics.isEmpty)
               SliverToBoxAdapter(
                 child: _PageSection(
                   top: 16,
@@ -95,11 +149,15 @@ class ReadingStatisticsPage extends StatelessWidget {
               )
             else
               SliverList.builder(
-                itemCount: data.recentComics.length,
+                itemCount: comics.length,
                 itemBuilder: (context, index) {
                   return _PageSection(
                     horizontal: 16,
-                    child: _RecentComicTile(comic: data.recentComics[index]),
+                    child: _RecentComicTile(
+                      comic: comics[index],
+                      onDelete:
+                          widget.onDelete ?? _removeReadingStatisticsForComic,
+                    ),
                   );
                 },
               ),
@@ -114,6 +172,72 @@ class ReadingStatisticsPage extends StatelessWidget {
     );
   }
 
+  void _showSortDialog() {
+    var selected = sortType;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return ContentDialog(
+              title: 'Sort'.tl,
+              content: RadioGroup<ReadingStatisticsSortType>(
+                groupValue: selected,
+                onChanged: (v) {
+                  setDialogState(() {
+                    selected = v ?? selected;
+                  });
+                },
+                child: Column(
+                  children: [
+                    RadioListTile<ReadingStatisticsSortType>(
+                      title: Text('Last Read'.tl),
+                      value: ReadingStatisticsSortType.lastRead,
+                    ),
+                    RadioListTile<ReadingStatisticsSortType>(
+                      title: Text('Reading Time Desc'.tl),
+                      value: ReadingStatisticsSortType.durationDesc,
+                    ),
+                    RadioListTile<ReadingStatisticsSortType>(
+                      title: Text('Reading Time Asc'.tl),
+                      value: ReadingStatisticsSortType.durationAsc,
+                    ),
+                    RadioListTile<ReadingStatisticsSortType>(
+                      title: Text('Name Asc'.tl),
+                      value: ReadingStatisticsSortType.nameAsc,
+                    ),
+                    RadioListTile<ReadingStatisticsSortType>(
+                      title: Text('Name Desc'.tl),
+                      value: ReadingStatisticsSortType.nameDesc,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _applySort(selected);
+                  },
+                  child: Text('Confirm'.tl),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _applySort(ReadingStatisticsSortType value) {
+    if (value == sortType) return;
+    setState(() {
+      sortType = value;
+    });
+    appdata.settings[_sortKey] = value.value;
+    unawaited(appdata.saveData());
+  }
+
   void _confirmClear(BuildContext context) {
     showConfirmDialog(
       context: context,
@@ -121,11 +245,17 @@ class ReadingStatisticsPage extends StatelessWidget {
       content: 'Are you sure you want to clear reading statistics?'.tl,
       confirmText: 'Clear',
       btnColor: context.colorScheme.error,
-      onConfirm: onClear ?? HistoryManager().clearReadingStatistics,
+      onConfirm: widget.onClear ?? HistoryManager().clearReadingStatistics,
     );
+  }
+
+  void _removeReadingStatisticsForComic(ComicReadingStatistics comic) {
+    HistoryManager().removeReadingStatistics(comic.id, comic.type);
   }
 }
 
+/// Content stretches to the available width — the page has no fixed body
+/// width, so a wide window is filled instead of leaving side gutters.
 class _PageSection extends StatelessWidget {
   const _PageSection({
     required this.child,
@@ -141,15 +271,9 @@ class _PageSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 920),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom),
-          child: child,
-        ),
-      ),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(horizontal, top, horizontal, bottom),
+      child: child,
     );
   }
 }
@@ -356,17 +480,22 @@ class _ReadingBar extends StatelessWidget {
               Expanded(
                 child: Align(
                   alignment: Alignment.bottomCenter,
-                  child: FractionallySizedBox(
-                    heightFactor: factor,
-                    widthFactor: 0.58,
-                    child: DecoratedBox(
-                      key: ValueKey('reading-bar-$label'),
-                      decoration: BoxDecoration(
-                        color: isToday
-                            ? context.colorScheme.tertiary
-                            : context.colorScheme.primary,
-                        borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(4),
+                  // The chart spans the full page width, so cap the slot width
+                  // to keep bars bar-shaped on a wide window.
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 96),
+                    child: FractionallySizedBox(
+                      heightFactor: factor,
+                      widthFactor: 0.58,
+                      child: DecoratedBox(
+                        key: ValueKey('reading-bar-$label'),
+                        decoration: BoxDecoration(
+                          color: isToday
+                              ? context.colorScheme.tertiary
+                              : context.colorScheme.primary,
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(4),
+                          ),
                         ),
                       ),
                     ),
@@ -389,97 +518,104 @@ class _ReadingBar extends StatelessWidget {
 }
 
 class _RecentComicTile extends StatelessWidget {
-  const _RecentComicTile({required this.comic});
+  const _RecentComicTile({required this.comic, required this.onDelete});
 
   final ComicReadingStatistics comic;
+  final ValueChanged<ComicReadingStatistics> onDelete;
 
-  Comic get _displayComic => Comic(
-    comic.title,
-    comic.cover,
-    comic.id,
-    comic.subtitle,
-    null,
-    '',
-    comic.type.sourceKey,
-    null,
-    null,
-  );
+  Comic get _displayComic => _readingStatisticsComic(comic);
 
   @override
   Widget build(BuildContext context) {
     final displayComic = _displayComic;
     final image = comic.cover.isEmpty ? null : findImageProvider(displayComic);
-    return InkWell(
-      key: ValueKey('reading-comic-${comic.type.value}-${comic.id}'),
-      onTap: () {
-        context.to(
-          () => ComicPage(
-            id: comic.id,
-            sourceKey: comic.type.sourceKey,
-            cover: comic.cover,
-            title: comic.title,
+    return SwipeActionTile(
+      key: ValueKey('reading-statistics-swipe-${comic.type.value}-${comic.id}'),
+      groupTag: 'reading-statistics',
+      endPane: SwipePane(
+        dismissOnFullSwipe: true,
+        onFullSwipe: () => onDelete(comic),
+        actions: [
+          SwipeAction(
+            icon: Icons.delete_outline,
+            label: 'Delete'.tl,
+            onPressed: () => onDelete(comic),
           ),
-        );
-      },
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 78),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: context.colorScheme.outlineVariant),
-          ),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 60,
-              clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                color: context.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: image == null
-                  ? const Icon(Icons.menu_book_outlined)
-                  : AnimatedImage(image: image, fit: BoxFit.cover),
+        ],
+      ),
+      child: InkWell(
+        key: ValueKey('reading-comic-${comic.type.value}-${comic.id}'),
+        onTap: () {
+          context.to(
+            () => ComicPage(
+              id: comic.id,
+              sourceKey: comic.type.sourceKey,
+              cover: comic.cover,
+              title: comic.title,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    comic.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  if (comic.subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+          );
+        },
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 78),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(color: context.colorScheme.outlineVariant),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 60,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: context.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: image == null
+                    ? const Icon(Icons.menu_book_outlined)
+                    : AnimatedImage(image: image, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      comic.subtitle,
+                      comic.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
+                      style: Theme.of(context).textTheme.titleSmall,
                     ),
+                    if (comic.subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        comic.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 84,
-              child: Text(
-                formatReadingDuration(comic.duration),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.end,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: context.colorScheme.primary,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 12),
+              // Sized to the text so values like "2 h 6 min" stay on one line;
+              // the cap only stops an outlier from squeezing out the title.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 160),
+                child: Text(
+                  formatReadingDuration(comic.duration),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: context.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

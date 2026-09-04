@@ -24,6 +24,19 @@ abstract mixin class _ComicPageActions {
   /// completes, so pre-translate must wait rather than treat it as chapter-less.
   bool get isDetailsLoading;
 
+  /// Whether this comic's chapter list is currently rendered with same-title
+  /// repeats collapsed. Display-only: every consumer (reader, download,
+  /// pre-translate) still addresses chapters by their original flat index.
+  bool get hideDuplicateChapters =>
+      ChapterDuplicatePrefs.isHidden(comic.id, comic.sourceKey);
+
+  /// Flat indices this comic would hide, computed per group so that two editions
+  /// each having a "第一话" is not treated as a repeat.
+  Set<int> get duplicateChapterIndices =>
+      comic.chapters?.duplicateTitleIndices() ?? const {};
+
+  int get _duplicateChapterCount => duplicateChapterIndices.length;
+
   bool isLiking = false;
 
   bool isLiked = false;
@@ -121,15 +134,17 @@ abstract mixin class _ComicPageActions {
       update();
       App.rootContext.showMessage(message: "Removed from read later".tl);
     } else {
-      await ReadLaterManager().addItem(ReadLaterItem(
-        id: comic.id,
-        title: comic.title,
-        subtitle: comic.subTitle,
-        cover: comic.cover,
-        type: comic.comicType,
-        tags: comic.plainTags,
-        time: DateTime.now(),
-      ));
+      await ReadLaterManager().addItem(
+        ReadLaterItem(
+          id: comic.id,
+          title: comic.title,
+          subtitle: comic.subTitle,
+          cover: comic.cover,
+          type: comic.comicType,
+          tags: comic.plainTags,
+          time: DateTime.now(),
+        ),
+      );
       update();
       App.rootContext.showMessage(message: "Added to read later".tl);
     }
@@ -196,9 +211,7 @@ abstract mixin class _ComicPageActions {
     // Treating that as chapter-less would wrongly start a whole-comic job and
     // skip the picker, so wait for the fetch instead.
     if (isDetailsLoading && comic.chapters == null) {
-      App.rootContext.showMessage(
-        message: "Loading chapters, please wait".tl,
-      );
+      App.rootContext.showMessage(message: "Loading chapters, please wait".tl);
       return;
     }
     // Ordered (id, title) list of chapters; a chapter-less comic is one job.
@@ -218,9 +231,10 @@ abstract mixin class _ComicPageActions {
         var indices = <int>[];
         for (var entry in chapters.getGroup(groupName).entries) {
           indices.add(entries.length);
-          entries.add(
-            (entry.key, entry.value.isEmpty ? 'E$index' : entry.value),
-          );
+          entries.add((
+            entry.key,
+            entry.value.isEmpty ? 'E$index' : entry.value,
+          ));
           index++;
         }
         groups.add((groupName, indices));
@@ -244,6 +258,7 @@ abstract mixin class _ComicPageActions {
         sourceKey: comic.sourceKey,
         comicType: comic.comicType,
         title: comic.title,
+        cover: comic.cover,
         chapters: picked,
       );
       App.rootContext.showMessage(
@@ -273,6 +288,7 @@ abstract mixin class _ComicPageActions {
         sourceKey: comic.sourceKey,
         comicType: comic.comicType,
         title: comic.title,
+        cover: comic.cover,
         entries: entries,
         groups: groups,
         finishSelect: startJob,
@@ -528,6 +544,12 @@ abstract mixin class _ComicPageActions {
           details.chapters!.titles.toList(),
           (v) => selected = v,
           downloaded,
+          // Chapters collapsed on the detail page stay out of the picker, and
+          // out of "Download All": the indices here are the ones the task
+          // downloads, so a hidden row must not slip in through select-all.
+          hiddenEps: hideDuplicateChapters
+              ? details.chapters!.duplicateTitleIndices()
+              : const {},
         ),
       );
       if (selected == null) return;
@@ -591,6 +613,30 @@ abstract mixin class _ComicPageActions {
           );
         },
       ),
+      // Only offered when this comic actually has repeats: a chapter list
+      // without any would show a switch that visibly does nothing.
+      if (_duplicateChapterCount > 0)
+        MenuEntry(
+          icon: hideDuplicateChapters
+              ? Icons.filter_alt_rounded
+              : Icons.filter_alt_off_rounded,
+          text: hideDuplicateChapters
+              ? "Show duplicate chapters".tl
+              : "Hide duplicate chapters".tl,
+          color: hideDuplicateChapters ? context.colorScheme.primary : null,
+          onClick: () {
+            final next = !hideDuplicateChapters;
+            ChapterDuplicatePrefs.setHidden(comic.id, comic.sourceKey, next);
+            update();
+            context.showMessage(
+              message: next
+                  ? "Hid @count duplicate chapters".tlParams({
+                      'count': _duplicateChapterCount,
+                    })
+                  : "Showing all chapters".tl,
+            );
+          },
+        ),
       MenuEntry(
         icon: Icons.copy,
         text: "Copy Title".tl,
@@ -648,22 +694,19 @@ abstract mixin class _ComicPageActions {
           icon: Icons.library_books_outlined,
           text: "Add to collection".tl,
           onClick: () {
-            showAddToCollectionDialog(
-              context,
-              [
-                Comic(
-                  comic.title,
-                  comic.cover,
-                  comic.id,
-                  comic.subTitle,
-                  comic.plainTags,
-                  comic.description ?? '',
-                  comic.sourceKey,
-                  comic.maxPage,
-                  null,
-                ),
-              ],
-            );
+            showAddToCollectionDialog(context, [
+              Comic(
+                comic.title,
+                comic.cover,
+                comic.id,
+                comic.subTitle,
+                comic.plainTags,
+                comic.description ?? '',
+                comic.sourceKey,
+                comic.maxPage,
+                null,
+              ),
+            ]);
           },
         ),
       // Not offered for a collection: it has no upstream source to link to or
@@ -709,11 +752,7 @@ abstract mixin class _ComicPageActions {
             startWebdavMigrationFlow([_localDownloadedComic()!]);
           },
         ),
-      MenuEntry(
-        icon: Icons.block,
-        text: "Block".tl,
-        onClick: blockThisComic,
-      ),
+      MenuEntry(icon: Icons.block, text: "Block".tl, onClick: blockThisComic),
     ]);
   }
 

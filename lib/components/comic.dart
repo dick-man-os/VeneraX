@@ -77,11 +77,18 @@ ImageProvider? findImageProvider(Comic comic) {
     }
     image = LocalComicImageProvider(localComic);
   } else {
+    // Only this branch cannot recover from an empty cover: the downloader has
+    // no url to fetch. Every branch above self-heals (local dir scan, history
+    // re-fetch), so the check must not be hoisted out of here.
+    final fallbackToLocalCover = comic is FavoriteItem;
+    if (comic.cover.isEmpty && !fallbackToLocalCover) {
+      return null;
+    }
     image = CachedImageProvider(
       comic.cover,
       sourceKey: comic.sourceKey,
       cid: comic.id,
-      fallbackToLocalCover: comic is FavoriteItem,
+      fallbackToLocalCover: fallbackToLocalCover,
     );
   }
   return image;
@@ -2879,6 +2886,8 @@ class SimpleComicTile extends StatelessWidget {
     this.withTitle = false,
     this.heroID,
     this.showFavorite = false,
+    this.width = 98,
+    this.height = 136,
   });
 
   final Comic comic;
@@ -2890,6 +2899,12 @@ class SimpleComicTile extends StatelessWidget {
   final int? heroID;
 
   final bool showFavorite;
+
+  /// Optional dimensions for responsive surfaces such as the home feed. The
+  /// established 98x136 size remains the default for all other callers.
+  final double width;
+
+  final double height;
 
   Widget _buildCover() {
     var image = findImageProvider(comic);
@@ -2989,8 +3004,8 @@ class SimpleComicTile extends StatelessWidget {
     }
 
     Widget child = Container(
-      width: 98,
-      height: 136,
+      width: width,
+      height: height,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
         color: Theme.of(context).colorScheme.secondaryContainer,
@@ -3028,7 +3043,7 @@ class SimpleComicTile extends StatelessWidget {
           child,
           const SizedBox(height: 4),
           SizedBox(
-            width: 92,
+            width: width - 6,
             child: Center(
               child: Text(
                 comic.title.replaceAll('\n', ''),
