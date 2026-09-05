@@ -4,8 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_source/source_library.dart';
-import 'package:venera/network/app_dio.dart';
-import 'package:venera/utils/ext.dart';
+import 'package:venera/network/source_url.dart';
 import 'package:venera/utils/io.dart';
 
 enum ComicSourceUpdateTaskStatus { running, completed, canceled, failed }
@@ -275,18 +274,12 @@ class ComicSourceUpdateTaskManager with ChangeNotifier {
     // catalog-managed source never reaches this fallback without a validated
     // target, including after ambiguous/missing/unreachable resolution.
     final downloadUrl = target?.downloadUrl ?? source.url;
-    if (!downloadUrl.isURL) {
+    if (!isValidSourceUrl(downloadUrl)) {
       throw Exception('Invalid url config');
     }
     var removed = false;
     try {
-      final res = await AppDio().get<String>(
-        downloadUrl,
-        options: Options(
-          responseType: ResponseType.plain,
-          headers: {'cache-time': 'no'},
-        ),
-      );
+      final res = await fetchSourceText(downloadUrl);
       final data = res.data;
       if (data == null || data.isEmpty) {
         throw Exception('Empty response');

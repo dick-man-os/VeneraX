@@ -14,11 +14,10 @@ import 'package:venera/foundation/comic_source/source_library.dart';
 import 'package:venera/foundation/comic_source_update_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/webdav_library_store.dart';
-import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/cookie_jar.dart';
+import 'package:venera/network/source_url.dart';
 import 'package:venera/pages/webdav_libraries_page.dart';
 import 'package:venera/pages/webview.dart';
-import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -212,11 +211,7 @@ class ComicSourcePage extends StatelessWidget {
       }
       List? list;
       try {
-        var res = await AppDio()
-            .get<String>(
-              library.url,
-              options: Options(headers: {'cache-time': 'no'}),
-            )
+        var res = await fetchSourceText(library.url)
             .timeout(const Duration(seconds: 20));
         if (res.statusCode != 200) {
           continue;
@@ -728,9 +723,7 @@ class _BodyState extends State<_Body> {
     if (url.isEmpty) {
       return;
     }
-    var splits = url.split("/");
-    splits.removeWhere((element) => element == "");
-    var fileName = splits.last;
+    var fileName = ComicSourceParser.scriptFileName(url);
     bool cancel = false;
     var controller = showLoadingDialog(
       App.rootContext,
@@ -738,13 +731,7 @@ class _BodyState extends State<_Body> {
       barrierDismissible: false,
     );
     try {
-      var res = await AppDio().get<String>(
-        url,
-        options: Options(
-          responseType: ResponseType.plain,
-          headers: {"cache-time": "no"},
-        ),
-      );
+      var res = await fetchSourceText(url);
       if (cancel) return;
       controller.close();
       await addSource(res.data!, fileName, originLibraryId);
@@ -826,12 +813,8 @@ class _ComicSourceListState extends State<_ComicSourceList> {
       });
       return;
     }
-    var dio = AppDio();
     try {
-      var res = await dio.get<String>(
-        library.url,
-        options: Options(headers: {'cache-time': 'no'}),
-      );
+      var res = await fetchSourceText(library.url);
       if (res.statusCode != 200) {
         throw "error";
       }
@@ -1046,7 +1029,7 @@ String? _resolveSourceDownloadUrl({
   String? fileName,
   required String listUrl,
 }) {
-  if (url != null && url.isURL) {
+  if (url != null && isValidSourceUrl(url)) {
     return url;
   }
   if (fileName == null || fileName.isEmpty) {
@@ -1059,7 +1042,7 @@ String? _resolveSourceDownloadUrl({
   } else {
     resolved = '$listUrl/$fileName';
   }
-  return resolved.isURL ? resolved : null;
+  return isValidSourceUrl(resolved) ? resolved : null;
 }
 
 CatalogSourceArtifact? _catalogArtifactFromEntry(
@@ -1162,13 +1145,7 @@ Future<bool> _installSourceFromArtifact(CatalogSourceArtifact artifact) async {
     barrierDismissible: false,
   );
   try {
-    var res = await AppDio().get<String>(
-      url,
-      options: Options(
-        responseType: ResponseType.plain,
-        headers: {"cache-time": "no"},
-      ),
-    );
+    var res = await fetchSourceText(url);
     if (cancel) return false;
     controller.close();
     var comicSource = await ComicSourceParser().createAndParse(
@@ -1406,7 +1383,7 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
             FilledButton(
               onPressed: () {
                 url = url.trim();
-                if (!url.isURL) {
+                if (!isValidSourceUrl(url)) {
                   context.showMessage(message: "Invalid URL".tl);
                   return;
                 }
@@ -1458,7 +1435,7 @@ class _SourceLibrariesPageState extends State<SourceLibrariesPage> {
             FilledButton(
               onPressed: () {
                 url = url.trim();
-                if (!url.isURL) {
+                if (!isValidSourceUrl(url)) {
                   context.showMessage(message: "Invalid URL".tl);
                   return;
                 }
@@ -2494,11 +2471,7 @@ class _SliverComicSourceState extends State<_SliverComicSource> {
     await Future.wait(
       libraries.map((lib) async {
         try {
-          var res = await AppDio()
-              .get<String>(
-                lib.url,
-                options: Options(headers: {'cache-time': 'no'}),
-              )
+          var res = await fetchSourceText(lib.url)
               .timeout(const Duration(seconds: 20));
           var list = jsonDecode(res.data!) as List;
           final artifacts = list
