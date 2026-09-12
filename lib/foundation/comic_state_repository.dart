@@ -44,6 +44,13 @@ class ComicIdentity {
   bool get isLocal => platform.kind == SourcePlatformKind.local;
 }
 
+class AcceptedSearchWork {
+  const AcceptedSearchWork({required this.workId, required this.aliases});
+
+  final String workId;
+  final List<String> aliases;
+}
+
 class ComicState {
   const ComicState({
     required this.identity,
@@ -292,6 +299,76 @@ class ComicStateRepository {
   /// status string should use this instead.
   String? quickStatusFor(Comic comic) =>
       _ComicMetadata.statusFromTags(comic.tags);
+
+  /// Resolves accepted work membership for a provider response in bounded SQL
+  /// batches. This keeps aggregate search from issuing one synchronous query
+  /// per result while preserving the same read-only, accepted-only contract.
+  Map<(String, String), AcceptedSearchWork> peekAcceptedSearchWorks(
+    Iterable<Comic> comics,
+  ) {
+    final domain = _domain ?? (App.isInitialized ? App.domain : null);
+    if (domain == null || !domain.isInitialized) return const {};
+
+    final keysByDomainId = <String, List<(String, String)>>{};
+    for (final comic in comics) {
+      final key = (comic.sourceKey, comic.id);
+      final identity = identityFor(comic.sourceKey, comic.id);
+      (keysByDomainId[identity.comicId] ??= []).add(key);
+    }
+    if (keysByDomainId.isEmpty) return const {};
+
+    final workIdsByComic = <String, Set<String>>{};
+    final aliasesByMembership = <(String, String), Set<String>>{};
+    final comicIds = keysByDomainId.keys.toList(growable: false);
+    const batchSize = 400;
+    for (var start = 0; start < comicIds.length; start += batchSize) {
+      final end = (start + batchSize).clamp(0, comicIds.length);
+      final batch = comicIds.sublist(start, end);
+      final placeholders = List.filled(batch.length, '?').join(',');
+      final rows = domain.db.select('''
+        SELECT
+          current.comic_id AS current_comic_id,
+          current.work_id,
+          related_comic.title AS related_title
+        FROM work_sources current
+        JOIN work_sources related
+          ON related.work_id = current.work_id
+         AND related.link_status = 'accepted'
+        JOIN comics related_comic ON related_comic.comic_id = related.comic_id
+        WHERE current.link_status = 'accepted'
+          AND current.comic_id IN ($placeholders)
+        ORDER BY current.comic_id, current.work_id, related.comic_id;
+        ''', batch);
+      for (final row in rows) {
+        final comicId = row['current_comic_id'] as String;
+        final workId = row['work_id'] as String;
+        (workIdsByComic[comicId] ??= {}).add(workId);
+        final title = row['related_title'] as String?;
+        if (title != null && title.trim().isNotEmpty) {
+          (aliasesByMembership[(comicId, workId)] ??= {}).add(title);
+        }
+      }
+    }
+
+    final resolved = <(String, String), AcceptedSearchWork>{};
+    for (final entry in keysByDomainId.entries) {
+      final workIds = workIdsByComic[entry.key];
+      // Corrupt/legacy multiple accepted memberships are ambiguous, so keep
+      // the corresponding result separate rather than guessing.
+      if (workIds == null || workIds.length != 1) continue;
+      final workId = workIds.single;
+      final work = AcceptedSearchWork(
+        workId: workId,
+        aliases: List.unmodifiable(
+          aliasesByMembership[(entry.key, workId)] ?? const <String>{},
+        ),
+      );
+      for (final key in entry.value) {
+        resolved[key] = work;
+      }
+    }
+    return resolved;
+  }
 
   List<DomainComicSourceLink> relatedSourcesFor(Comic comic) {
     if (!_domainReady) {

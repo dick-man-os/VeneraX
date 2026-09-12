@@ -1,5 +1,11 @@
 {
   "zh_CN": {
+    "Best Matches": "最佳匹配",
+    "Results by Source": "各来源结果",
+    "Searching @n sources": "正在搜索 @n 个来源",
+    "From loaded source results": "来自已载入的来源结果",
+    "Show updated matches": "显示更新的匹配结果",
+    "Searching": "正在搜索",
     "Reading Statistics": "阅读统计",
     "Clear Reading Statistics": "清除阅读统计",
     "Are you sure you want to clear reading statistics?": "确定要清除阅读统计吗？",
@@ -1307,6 +1313,12 @@
     "This removes every stored translation and rendered page of this comic. The original images are unaffected.": "将删除本漫画所有已存的翻译和嵌字页面，原图不受影响。"
   },
   "zh_TW": {
+    "Best Matches": "最佳符合",
+    "Results by Source": "各來源結果",
+    "Searching @n sources": "正在搜尋 @n 個來源",
+    "From loaded source results": "來自已載入的來源結果",
+    "Show updated matches": "顯示更新的符合結果",
+    "Searching": "正在搜尋",
     "Reading Statistics": "閱讀統計",
     "Clear Reading Statistics": "清除閱讀統計",
     "Are you sure you want to clear reading statistics?": "確定要清除閱讀統計嗎？",

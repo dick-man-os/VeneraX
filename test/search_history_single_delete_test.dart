@@ -8,6 +8,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/pages/search_page.dart';
+import 'package:venera/pages/aggregated_search_page.dart';
 import 'package:venera/pages/search_result_page.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -157,6 +158,42 @@ void main() {
     expect(find.text('Search History'), findsOneWidget);
     expect(find.byType(SearchResultPage), findsNothing);
   });
+
+  testWidgets(
+    'aggregate multilingual history click, single delete and clear all persist',
+    (tester) async {
+      appdata.settings['defaultSearchTarget'] = '_aggregated_';
+      appdata.searchHistory = ['神之塔', 'Tower of God'];
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (_, child) => Material(child: child),
+          home: const SearchPage(),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Tower of God'));
+      await waitForAppdataSave(tester);
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(AggregatedSearchPage), findsOneWidget);
+      expect(appdata.searchHistory, ['Tower of God', '神之塔']);
+      Navigator.of(tester.element(find.byType(AggregatedSearchPage))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      await tester.ensureVisible(find.byTooltip('Delete').first);
+      await tester.tap(find.byTooltip('Delete').first);
+      await waitForAppdataSave(tester);
+      expect(appdata.searchHistory, ['神之塔']);
+      expect(find.byType(AggregatedSearchPage), findsNothing);
+      await tester.tap(find.byIcon(Icons.delete_sweep_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Clear'));
+      await tester.pumpAndSettle();
+      await waitForAppdataSave(tester);
+      expect(appdata.searchHistory, isEmpty);
+      expect((await tester.runAsync(readSnapshot))!['searchHistory'], isEmpty);
+    },
+  );
 
   test(
     'single deletion and empty state persist through the existing store',

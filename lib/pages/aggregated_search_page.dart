@@ -1,4 +1,8 @@
 import "package:flutter/material.dart";
+import 'package:flutter/rendering.dart';
+import 'package:venera/components/best_matches_section.dart';
+import 'package:venera/foundation/search/aggregated_search_controller.dart';
+import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:shimmer_animation/shimmer_animation.dart';
 import "package:venera/components/components.dart";
 import "package:venera/foundation/app.dart";
@@ -18,64 +22,118 @@ class AggregatedSearchPage extends StatefulWidget {
 }
 
 class _AggregatedSearchPageState extends State<AggregatedSearchPage> {
-  late final List<ComicSource> sources;
-
+  List<ComicSource> sources = [];
   late final SearchBarController controller;
+  final search = AggregatedSearchController();
+  var _keyword = '';
 
-  var _keyword = "";
+  List<ComicSource> _sourceSnapshot() {
+    final seen = <String>{};
+    return [
+      for (final key in appdata.settings['searchSources'] as List)
+        if (key is String && seen.add(key))
+          if (ComicSource.find(key) case final source?)
+            if (source.searchPageData != null) source,
+    ];
+  }
+
+  void _search(String text) {
+    _keyword = text;
+    if (text.trim().isNotEmpty) appdata.addSearchHistory(text);
+    sources = _sourceSnapshot();
+    search.search(text, sources.map(SearchProvider.new).toList());
+  }
+
+  void _sourcesChanged() {
+    final next = _sourceSnapshot();
+    if (next.length == sources.length &&
+        Iterable<int>.generate(
+          next.length,
+        ).every((i) => identical(next[i], sources[i]))) {
+      return;
+    }
+    sources = next;
+    search.search(_keyword, sources.map(SearchProvider.new).toList());
+  }
+
+  void _favoriteChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
-    var all = ComicSource.all()
-        .where((e) => e.searchPageData != null)
-        .map((e) => e.key)
-        .toList();
-    var settings = appdata.settings['searchSources'] as List;
-    var sources = <String>[];
-    for (var source in settings) {
-      if (all.contains(source)) {
-        sources.add(source);
-      }
-    }
-    this.sources = sources.map((e) => ComicSource.find(e)!).toList();
-    _keyword = widget.keyword;
-    // Aggregated search also feeds the shared search history; without this,
-    // searches run in aggregated mode never showed up under recent searches.
-    if (widget.keyword.trim().isNotEmpty) {
-      appdata.addSearchHistory(widget.keyword);
-    }
+    super.initState();
     controller = SearchBarController(
       currentText: widget.keyword,
-      onSearch: (text) {
-        if (text.trim().isNotEmpty) {
-          appdata.addSearchHistory(text);
-        }
-        setState(() {
-          _keyword = text;
-        });
-      },
+      onSearch: _search,
     );
-    super.initState();
+    _search(widget.keyword);
+    ComicSourceManager().addListener(_sourcesChanged);
+    LocalFavoritesManager().addListener(_favoriteChanged);
+  }
+
+  @override
+  void dispose() {
+    ComicSourceManager().removeListener(_sourcesChanged);
+    LocalFavoritesManager().removeListener(_favoriteChanged);
+    search.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return SmoothCustomScrollView(
-      scrollbarTopPadding: context.padding.top + 56,
-      slivers: [
-        SliverSearchBar(controller: controller),
-        SliverList(
-          key: ValueKey(_keyword),
-          delegate: SliverChildBuilderDelegate((context, index) {
-            final source = sources[index];
-            return _SliverSearchResult(
-              key: ValueKey(source.key),
-              source: source,
-              keyword: _keyword,
-            );
-          }, childCount: sources.length),
-        ),
-      ],
+    return ListenableBuilder(
+      listenable: search,
+      builder: (context, _) {
+        final results = search.results;
+        return NotificationListener<UserScrollNotification>(
+          onNotification: (notification) {
+            if (notification.direction != ScrollDirection.idle) {
+              search.freezePlacement();
+            }
+            return false;
+          },
+          child: SmoothCustomScrollView(
+            scrollbarTopPadding: context.padding.top + 56,
+            slivers: [
+              SliverSearchBar(controller: controller),
+              if (_keyword.trim().isNotEmpty) ...[
+                SliverToBoxAdapter(
+                  child: BestMatchesSection(
+                    key: ValueKey(search.generation),
+                    controller: search,
+                    onOpen: (comic) {
+                      search.freezePlacement();
+                      context.to(
+                        () => ComicPage(
+                          id: comic.id,
+                          sourceKey: comic.sourceKey,
+                          title: comic.title,
+                          cover: comic.cover,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: ListTile(title: Text('Results by Source'.tl)),
+                ),
+                SliverList(
+                  key: ValueKey(search.generation),
+                  delegate: SliverChildBuilderDelegate((context, index) {
+                    return _SliverSearchResult(
+                      key: ValueKey(sources[index].key),
+                      source: sources[index],
+                      keyword: _keyword,
+                      result: results[index],
+                    );
+                  }, childCount: sources.length),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -84,10 +142,13 @@ class _SliverSearchResult extends StatefulWidget {
   const _SliverSearchResult({
     required this.source,
     required this.keyword,
+    required this.result,
     super.key,
   });
 
   final ComicSource source;
+
+  final SearchSourceResult result;
 
   final String keyword;
 
@@ -97,7 +158,7 @@ class _SliverSearchResult extends StatefulWidget {
 
 class _SliverSearchResultState extends State<_SliverSearchResult>
     with AutomaticKeepAliveClientMixin {
-  bool isLoading = true;
+  bool get isLoading => widget.result.loading;
 
   static const _kComicHeight = 162.0;
 
@@ -105,62 +166,12 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
 
   static const _kLeftPadding = 16.0;
 
-  List<Comic>? comics;
+  List<Comic> get comics => widget.result.comics;
 
-  String? error;
-
-  void load() async {
-    final data = widget.source.searchPageData!;
-    var options = (data.searchOptions ?? [])
-        .map((e) => e.defaultValue)
-        .toList();
-    if (data.loadPage != null) {
-      var res = await data.loadPage!(widget.keyword, 1, options);
-      if (!mounted) return;
-      if (!res.error) {
-        setState(() {
-          comics = res.data;
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          error = res.errorMessage ?? "Unknown error".tl;
-          isLoading = false;
-        });
-      }
-    } else if (data.loadNext != null) {
-      var res = await data.loadNext!(widget.keyword, null, options);
-      if (!mounted) return;
-      if (!res.error) {
-        setState(() {
-          comics = res.data;
-          isLoading = false;
-        });
-      } else {
-        setState(() {
-          error = res.errorMessage ?? "Unknown error".tl;
-          isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    load();
-    LocalFavoritesManager().addListener(_onFavoriteChanged);
-  }
-
-  @override
-  void dispose() {
-    LocalFavoritesManager().removeListener(_onFavoriteChanged);
-    super.dispose();
-  }
-
-  void _onFavoriteChanged() {
-    if (mounted) setState(() {});
-  }
+  String? get error =>
+      widget.result.error?.startsWith('CloudflareException') == true
+      ? 'Cloudflare verification required'.tl
+      : widget.result.error;
 
   Widget buildPlaceHolder() {
     return Container(
@@ -184,9 +195,6 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
 
   @override
   Widget build(BuildContext context) {
-    if (error != null && error!.startsWith("CloudflareException")) {
-      error = "Cloudflare verification required".tl;
-    }
     super.build(context);
     return InkWell(
       onTap: () {
@@ -231,7 +239,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
                 ),
               ),
             )
-          else if (error != null || comics == null || comics!.isEmpty)
+          else if (error != null || comics.isEmpty)
             SizedBox(
               height: _kComicHeight,
               child: Column(
@@ -258,7 +266,7 @@ class _SliverSearchResultState extends State<_SliverSearchResult>
               height: _kComicHeight,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                children: [for (var c in comics!) buildComic(c)],
+                children: [for (var c in comics) buildComic(c)],
               ),
             ),
         ],
